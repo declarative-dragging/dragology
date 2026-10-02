@@ -469,3 +469,47 @@ const draggable: Draggable<State> = ({ state, d }) => (
   ```tsx
   <BarChart data={preset.data} color={preset.color} dragologyLerpProps={["data", "color"]} />
   ```
+
+## Writing Your Own Operators
+
+Reach for this only when no combination of the built-in specs does what you need. Every built-in spec (`d.between`, `.withFloating`, ...) is an **operator**: a class extending `Operator`. You can write your own with what `dragology` exports.
+
+The library constructs a fresh instance for each drag, as `new YourOp(ctx, ...args)`, where `ctx` (a `DragInitContext`) holds the draggable, the dragged element, and the start state. So:
+
+- Setup goes in the constructor, which runs once per drag.
+- Memory between frames goes in plain fields.
+- `frame(frame)` runs on every pointer move and returns an `OpResult`: a `preview` (a function returning the rendered SVG, usually `renderStateReadOnly(this.ctx, state)`), the `dropState`, and the `gap` (how far the dragged element is from the pointer, which `closest` and `whenFar` compare).
+- `name` labels the op in the drag's active path and in the debug views.
+
+A **modifier** wraps one other spec. Extend `Modifier`, which runs the wrapped spec as `this.inner`, and turn the class into a `.with(...)` helper with `modifier`:
+
+```tsx
+import { modifier, Modifier, type DragFrame, type DragInitContext, type DragSpecData, Vec2 } from "dragology";
+
+/** Feed the wrapped spec a pointer moved `dx` to the right. */
+class ShiftPointer<T extends object> extends Modifier<T> {
+  readonly name = "shiftPointer";
+
+  constructor(ctx: DragInitContext<T>, inner: DragSpecData<T>, readonly dx: number) {
+    super(ctx, inner);
+  }
+
+  frame(frame: DragFrame) {
+    return this.inner.run({ pointer: frame.pointer.add(Vec2(this.dx, 0)) });
+  }
+}
+const shiftPointer = modifier(ShiftPointer);
+
+dragologyOnDrag={() => d.vary(state, [param("x"), param("y")]).with(shiftPointer(30))}
+```
+
+To change the wrapped spec's result rather than its input, spread it and override fields: `return { ...this.inner.run(frame), dropState: ... }`. The spread keeps the result's `activePath`, which records which branch of the spec tree is driving the drag. If you build a result from scratch instead, the active path stops at your op.
+
+An operator that isn't a modifier extends `Operator` directly, and `operator(YourOp)` turns it into a function that builds specs: `const nearest = operator(NearestOp); nearest(states)`. To run other specs inside it, start them in the constructor with `this.child(key, spec)`, and call `child.run(frame)` each frame. Returning a child's result (spread or not) continues the active path into that child, under its `key`. An op that switches between options of its own can set `activePath` itself (e.g. `activePath: String(i)`), so the library animates the switch.
+
+Operators also draw themselves in the debug views (the "Spec tree" and "Overlay" toggles on the demo page):
+
+- `treeView(props)` returns the op's node in the spec tree, usually a `Box` with `path={props.path}`, containing `child.treeView(props)` for each child.
+- `overlayVis(props)` returns SVG marks on the canvas, including its children's, drawn with `<OverlayVis op={child.op} pointer={props.pointer} active={props.active} />`.
+
+Both are called as plain functions, so they can't use hooks. They read the op's fields, which hold whatever its last frame left there. `Modifier` provides both: a box labeled with the op's `name` around the wrapped spec's node, and the wrapped spec's marks. Override them to show more, e.g. `treeView(props) { return this.wrapperView(props, `${this.dx}px`); }`. For marks of your own, `DistanceLine` draws a labeled gap, and `OutputThumbnail` and `StateThumbnails` show rendered states in the tree.

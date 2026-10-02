@@ -7,33 +7,84 @@ import {
   DemoNotes,
   DemoWithConfig,
 } from "../demo/ui";
-import { dragSpecToBehavior } from "../DragBehavior";
-import { Draggable } from "../draggable";
-import { DragSpec, DragSpecBuilder, param } from "../DragSpec";
-import { translate, Vec2 } from "../lib";
+// Only public API, to show that a modifier can live outside the library.
+import {
+  type DragFrame,
+  type Draggable,
+  type DragInitContext,
+  type DragSpecData,
+  Modifier,
+  modifier,
+  type OpOverlayVisProps,
+  type OpTreeViewProps,
+  OverlayVis,
+  param,
+  translate,
+  Vec2,
+} from "../lib";
 
-function withPointerDelay<T extends object>(
-  d: DragSpecBuilder<T>,
-  inner: DragSpec<T>,
-  delayMs: number,
-): DragSpec<T> {
-  return d.custom((ctx) => {
-    const innerBehavior = dragSpecToBehavior(inner, ctx);
-    const log: { time: number; pointer: Vec2 }[] = [];
+/** Lags the pointer by `delayMs` before feeding it to the wrapped spec. */
+const pointerDelay = modifier(
+  class<T extends object> extends Modifier<T> {
+    readonly name = "pointerDelay";
 
-    return (frame) => {
+    log: { time: number; pointer: Vec2 }[] = [];
+
+    constructor(
+      ctx: DragInitContext<T>,
+      inner: DragSpecData<T>,
+      readonly delayMs: number,
+    ) {
+      super(ctx, inner);
+    }
+
+    frame(frame: DragFrame) {
       const now = performance.now();
-      log.push({ time: now, pointer: frame.pointer });
+      this.log.push({ time: now, pointer: frame.pointer });
 
-      const targetTime = now - delayMs;
-      while (log.length > 1 && log[1].time <= targetTime) {
-        log.shift();
+      const targetTime = now - this.delayMs;
+      while (this.log.length > 1 && this.log[1].time <= targetTime) {
+        this.log.shift();
       }
 
-      return innerBehavior({ pointer: log[0].pointer });
-    };
-  });
-}
+      return this.inner.run({ pointer: this.log[0].pointer });
+    }
+
+    treeView(props: OpTreeViewProps) {
+      return this.wrapperView(props, `${this.delayMs}ms`);
+    }
+
+    overlayVis({ active, opacity }: OpOverlayVisProps) {
+      // Empty if this op hasn't run yet.
+      if (this.log.length === 0) return null;
+      const delayedPointer = this.log[0].pointer;
+      return (
+        <g>
+          {/* The wrapped spec's marks measure from the pointer it sees. */}
+          <OverlayVis
+            op={this.inner.op}
+            pointer={delayedPointer}
+            active={active}
+          />
+          <g opacity={opacity}>
+            <polyline
+              points={this.log
+                .map(({ pointer: p }) => `${p.x},${p.y}`)
+                .join(" ")}
+              fill="none"
+              stroke="magenta"
+              strokeWidth={1}
+            />
+            {this.log.map(({ pointer }, i) => (
+              <circle key={i} {...pointer.cxy()} r={1.5} fill="magenta" />
+            ))}
+            <circle {...delayedPointer.cxy()} r={4} fill="magenta" />
+          </g>
+        </g>
+      );
+    }
+  },
+);
 
 type State = {
   x: number;
@@ -52,11 +103,9 @@ const draggable: Draggable<State> = ({ state, d }) => {
       transform={translate(state)}
       r={RADIUS}
       dragologyOnDrag={() =>
-        withPointerDelay(
-          d,
-          d.vary(state, [param("x"), param("y")]),
-          state.config.delayMs,
-        )
+        d
+          .vary(state, [param("x"), param("y")])
+          .with(pointerDelay(state.config.delayMs))
       }
     />
   );
@@ -70,10 +119,14 @@ export default demo(
       <div>
         <DemoNotes>
           <p>
-            Demonstration of making a new operator using <code>d.custom</code>:{" "}
-            <code>withPointerDelay</code> lags the pointer before feeding it to
-            a nested behavior. (This reveals a current framework limitation: you
-            can't keep running a behavior after drop.)
+            Demonstration of defining a new modifier outside the library, with
+            its public API: <code>pointerDelay</code> lags the pointer before
+            feeding it to the spec it wraps. It's a <code>Modifier</code>{" "}
+            subclass, turned into a helper by <code>modifier(...)</code> and
+            attached with <code>.with(pointerDelay(ms))</code>. It also draws
+            itself in the debug tree view and overlay (the overlay shows the
+            buffered pointer positions). (This reveals a current framework
+            limitation: you can't keep running a behavior after drop.)
           </p>
         </DemoNotes>
         <DemoWithConfig>
@@ -109,6 +162,6 @@ export default demo(
         initialState: { ...initialState, config: { delayMs: 0 } },
       },
     ],
-    tags: ["d.custom", "d.vary"],
+    tags: ["Modifier", "spec.with", "d.vary"],
   },
 );

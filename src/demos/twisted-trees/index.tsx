@@ -13,11 +13,9 @@ import {
   DemoWithConfig,
 } from "../../demo/ui";
 import { Draggable } from "../../draggable";
-import {
-  type BetweenInterpolation,
-  type DragSpecBuilder,
-} from "../../DragSpec";
+import { type DragSpecBuilder } from "../../DragSpec";
 import { Vec2 } from "../../math/vec2";
+import { type BetweenInterpolation } from "../../ops/between";
 import { Svgx } from "../../svgx";
 import { Finalizers, pointRef, PointRef } from "../../svgx/finalizers";
 import { path, translate } from "../../svgx/helpers";

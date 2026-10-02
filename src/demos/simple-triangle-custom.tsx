@@ -61,8 +61,7 @@ const draggable: Draggable<State> = ({ state, d }) => (
               ),
             dropState: bestState,
             gap: draggedPos.dist(POSITIONS[bestIndex]),
-            activePath: `custom/${bestIndex}`,
-            tracedSpec: { type: "custom", fn: null! },
+            activePath: `${bestIndex}`,
           };
         })
       }

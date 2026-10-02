@@ -21,7 +21,7 @@ const ctx: DragInitContext<S> = {
   draggedId: "dot",
   anchorPos: Vec2(0),
   startState: start,
-  debug: { varyVisualizer: false, trace: false },
+  debug: { varyVisualizer: false },
 };
 
 const d = new DragSpecBuilder<S>(start);

@@ -45,7 +45,7 @@ export function setupListsInListsBenchmark(n: number): {
     draggedId: "A0",
     anchorPos: pointer,
     startState: state,
-    debug: { varyVisualizer: false, trace: false },
+    debug: { varyVisualizer: false },
   };
 
   return { callback, ctx, pointer };
@@ -97,7 +97,7 @@ export function setupPivotTableBenchmark(field: string): {
     draggedId,
     anchorPos: pointer,
     startState: state,
-    debug: { varyVisualizer: false, trace: false },
+    debug: { varyVisualizer: false },
   };
 
   return { callback, ctx, pointer };

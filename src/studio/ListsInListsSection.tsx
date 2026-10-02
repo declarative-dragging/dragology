@@ -71,14 +71,13 @@ function ListsInListsWithTree() {
             width={WIDTH}
             height={HEIGHT}
             onDragStatus={setDragStatus}
-            trace
           />
           <div
             style={{ width: 370, height: 500, zoom: 0.7, overflow: "hidden" }}
           >
             {showTree && draggingStatus && (
               <DragSpecTreeView
-                spec={draggingStatus.result.tracedSpec}
+                op={draggingStatus.result.op}
                 activePath={draggingStatus.result.activePath}
                 colorMap={null}
                 svgWidth={WIDTH}

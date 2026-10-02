@@ -6,8 +6,8 @@
  * call the handler; drags run the element's drag behavior along a
  * short pointer path to a candidate target point, exercising previews
  * and interpolation. Target points are the centers of id'd elements,
- * the drop positions the element's drag spec reports in its debug
- * trace (e.g. where each `fixed` state puts the element), and short
+ * the drop positions the element's drag behavior reports after a
+ * frame (e.g. where each `fixed` state puts the element), and short
  * nudges, the nudges also from an off-center grab (so drags that
  * rotate or scale the element, leaving its center put, do something).
  * (HTML controls in components aren't exercised yet.) Every reached
@@ -29,8 +29,7 @@
 import _ from "lodash";
 import React from "react";
 import { DragInitContext, dragSpecToBehavior } from "../DragBehavior";
-import { DragSpec, DragSpecData } from "../DragSpec";
-import { getTraceInfo } from "../DragSpecTraceInfo";
+import { DragSpec } from "../DragSpec";
 import {
   Draggable,
   getOnDragCallbackOnElement,
@@ -38,6 +37,7 @@ import {
   SetState,
 } from "../draggable";
 import { Vec2 } from "../math/vec2";
+import type { Operator } from "../op";
 import { findElement, shouldRecurseIntoChildren, Svgx } from "../svgx";
 import { Bounds, boundsCenter, getLocalBounds } from "../svgx/bounds";
 import { LayeredSvgx, layerSvg } from "../svgx/layers";
@@ -213,47 +213,19 @@ function pointInBox(bounds: Bounds & { empty: false }, frac: Vec2): Vec2 {
 }
 
 /**
- * Where the pointer goes to reach each drop candidate of a traced
- * drag spec (one built with `debug.trace`): the positions of its
- * `fixed` states, of the states its `between`s and `vary`s rendered,
- * and the centers of its `dropTarget`s, looking through combinators
- * and wrappers. Untraced parts (like a `whenFar` background while the
- * pointer is near) contribute nothing.
+ * Where the pointer goes to reach each drop candidate of a running
+ * drag behavior's op (after a frame): the positions of its `fixed`
+ * states, of the states its `between`s and `vary`s rendered, and the
+ * centers of its `dropTarget`s, looking through combinators and
+ * wrappers. Parts that didn't run (like a `whenFar` background while
+ * the pointer is near) contribute nothing.
  */
-function tracedDropPositions(spec: DragSpecData<any>): Vec2[] {
-  const here: Vec2[] = [];
-  switch (spec.type) {
-    case "fixed": {
-      const position = getTraceInfo(spec)?.position;
-      if (position) here.push(position);
-      break;
-    }
-    case "between":
-    case "vary":
-    case "varyFunc":
-      for (const r of getTraceInfo(spec)?.renderedStates ?? []) {
-        here.push(r.position);
-      }
-      break;
-    case "dropTarget": {
-      const bounds = getTraceInfo(spec)?.globalBounds;
-      if (bounds && !bounds.empty) here.push(boundsCenter(bounds));
-      break;
-    }
-    case "switchToStateAndFollow":
-    case "reactTo": {
-      const inner = getTraceInfo(spec)?.tracedInner;
-      if (inner) here.push(...tracedDropPositions(inner));
-      break;
-    }
-  }
-  const children: DragSpecData<any>[] = [
-    ...("specs" in spec ? spec.specs : []),
-    ...("inner" in spec ? [spec.inner] : []),
-    ...("foreground" in spec ? [spec.foreground, spec.background] : []),
-    ...("innerSpec" in spec ? [spec.innerSpec] : []),
+function opDropPositions(op: Operator<any>): Vec2[] {
+  if (op.frames === 0) return [];
+  return [
+    ...(op.fuzzDropPositions?.() ?? []),
+    ...op.children.flatMap((child) => opDropPositions(child.op)),
   ];
-  return [...here, ...children.flatMap(tracedDropPositions)];
 }
 
 /**
@@ -552,11 +524,11 @@ export function fuzzDraggable<T extends object>(
             draggedId: found.id,
             anchorPos: pointInBox(lb, mainGrab),
             startState: state,
-            debug: { varyVisualizer: false, trace: true },
+            debug: { varyVisualizer: false },
           });
-          const points = tracedDropPositions(
-            behavior({ pointer: from }).tracedSpec,
-          ).filter((p) => p.dist(from) > 1);
+          const points = opDropPositions(behavior({ pointer: from }).op).filter(
+            (p) => p.dist(from) > 1,
+          );
           return shuffle(
             _.uniqBy(points, (p) => `${Math.round(p.x)},${Math.round(p.y)}`),
           );
@@ -739,7 +711,7 @@ export function fuzzDraggable<T extends object>(
       draggedId: found.id,
       anchorPos,
       startState: state,
-      debug: { varyVisualizer: false, trace: false },
+      debug: { varyVisualizer: false },
     };
     let spec: DragSpec<T> = callback();
     let behavior = dragSpecToBehavior(spec, ctx);

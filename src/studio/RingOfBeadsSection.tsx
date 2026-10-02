@@ -69,7 +69,6 @@ function RingOfBeadsWithTree({
             width={WIDTH}
             height={HEIGHT}
             onDragStatus={setDragStatus}
-            trace
             simulateDrag={
               simulateDrag ? { id: "A", offset: dragOffset } : undefined
             }
@@ -83,7 +82,7 @@ function RingOfBeadsWithTree({
             }}
           >
             <DragSpecTreeView
-              spec={draggingStatus.result.tracedSpec}
+              op={draggingStatus.result.op}
               activePath={draggingStatus.result.activePath}
               colorMap={null}
               svgWidth={WIDTH}

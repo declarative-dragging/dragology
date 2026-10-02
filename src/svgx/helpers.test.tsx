@@ -38,7 +38,7 @@ it("a point grabbed on a draggableLine line follows it as its ends move", () => 
     // grabbed 25% of the way along
     anchorPos: Vec2(0.25, 0),
     startState: start,
-    debug: { varyVisualizer: false, trace: false },
+    debug: { varyVisualizer: false },
   };
   const d = new DragSpecBuilder<S>(start);
   const result = dragSpecToBehavior(

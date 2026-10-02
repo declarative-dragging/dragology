@@ -483,10 +483,7 @@ function nearNodeSpec(
 ): DragSpec<State> {
   const spot = portInfo(state, { node: target }).pos;
   return d.custom((ctx) => {
-    const inner = dragSpecToBehavior<State>(
-      { type: "fixed", state: result },
-      ctx,
-    );
+    const inner = dragSpecToBehavior<State>(d.fixed(result), ctx);
     return (frame) => {
       const center = frame.pointer.sub(ctx.anchorPos);
       const near = center.dist(spot) < HIT_R;
@@ -609,10 +606,7 @@ function hopfSpec(
     .dot(perp);
   const side = Math.sign(myOff - twinOff) || 1;
   return d.custom((ctx) => {
-    const inner = dragSpecToBehavior<State>(
-      { type: "fixed", state: result },
-      ctx,
-    );
+    const inner = dragSpecToBehavior<State>(d.fixed(result), ctx);
     return (frame) => {
       const v = frame.pointer.sub(ctx.anchorPos).sub(origin);
       const along = v.dot(chord) / Math.max(chord.dot(chord), 1);
@@ -715,10 +709,7 @@ function yankSpec(
   const result = yank(state, id, partnerId);
   const isCup = (state.nodes[id] as Bend).dir === "cup";
   return d.custom((ctx) => {
-    const inner = dragSpecToBehavior<State>(
-      { type: "fixed", state: result },
-      ctx,
-    );
+    const inner = dragSpecToBehavior<State>(d.fixed(result), ctx);
     return (frame) => {
       const center = frame.pointer.sub(ctx.anchorPos);
       const crossed = isCup

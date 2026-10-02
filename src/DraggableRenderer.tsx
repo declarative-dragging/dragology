@@ -135,7 +135,6 @@ export interface DraggableRendererBaseProps<T extends object> {
   onDragState?: (state: T) => void;
   onDragStatus?: (dragStatus: DragStatus<T>) => void;
   showDebugOverlay?: boolean;
-  trace?: boolean;
   showVaryVisualizer?: boolean;
   /**
    * Minimum pointer movement (in px) before a pointerdown becomes a drag.
@@ -207,12 +206,10 @@ function DraggableRendererControlled<T extends object>({
   onDragState,
   onDragStatus,
   showDebugOverlay,
-  trace: traceProp,
   showVaryVisualizer,
   dragThreshold = 2,
   simulateDrag,
 }: DraggableRendererBaseProps<T> & { state: T }) {
-  const trace = traceProp ?? showDebugOverlay ?? false;
   const catchToRenderError = useCatchToRenderError();
 
   const [status, setStatus, statusRef] = useStateWithRef<DragStatus<T>>({
@@ -331,10 +328,7 @@ function DraggableRendererControlled<T extends object>({
             draggedId: simId,
             anchorPos: center,
             startState: state,
-            debug: {
-              varyVisualizer: false,
-              trace,
-            },
+            debug: { varyVisualizer: false },
           };
           const frame: DragFrame = { pointer };
           setStatus(initDrag(dragSpec, behaviorCtx, state, frame, null));
@@ -430,7 +424,6 @@ function DraggableRendererControlled<T extends object>({
       dragThreshold,
       showVaryVisualizer: showVaryVisualizer ?? false,
       showDebugOverlay: showDebugOverlay ?? false,
-      trace,
     }),
     [
       catchToRenderError,
@@ -441,7 +434,6 @@ function DraggableRendererControlled<T extends object>({
       setPointerFromEvent,
       showVaryVisualizer,
       showDebugOverlay,
-      trace,
     ],
   );
 
@@ -479,7 +471,7 @@ function DraggableRendererControlled<T extends object>({
       {drawn.portals}
       {status.type === "dragging" && showDebugOverlay && pointer && (
         <ErrorBoundary>
-          <OverlayVis spec={status.result.tracedSpec} pointer={pointer} />
+          <OverlayVis op={status.result.op} pointer={pointer} />
         </ErrorBoundary>
       )}
       {simulateDrag && pointerOverrideRef.current && (
@@ -684,7 +676,6 @@ type RenderContext<T extends object> = {
   dragThreshold: number;
   showVaryVisualizer: boolean;
   showDebugOverlay: boolean;
-  trace: boolean;
 };
 
 /**
@@ -745,10 +736,7 @@ function postProcessForInteraction<T extends object>(
               draggedId,
               anchorPos,
               startState: state,
-              debug: {
-                varyVisualizer: ctx.showVaryVisualizer,
-                trace: ctx.trace,
-              },
+              debug: { varyVisualizer: ctx.showVaryVisualizer },
             };
 
             const frame: DragFrame = { pointer };

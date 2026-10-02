@@ -25,7 +25,7 @@ Fuzzing every demo takes several minutes. Don't block on a full `pnpm fuzz` with
 ## Layout
 
 - `src/lib.ts`: everything the library exports.
-- `src/DragSpec.tsx`: drag spec data and the `d.*` builder. `src/DragBehavior.tsx`: what each spec type does during a drag. `src/DraggableRenderer.tsx`: the React component (pointer handling, animation). `src/svgx/`: SVG tree utilities (layers, interpolation, transforms, bounds).
+- `src/ops/`: one drag spec operator per file (`between`, `closest`, `withOverlay`, ...): what it does during a drag, how it draws itself in the debug views, and its documented `d.*` or `spec.*` method. `src/op/`: the `Operator` and `Modifier` base classes they extend. `src/DragSpec.tsx`: the `d.*` builder and `spec.*` methods, one getter per op. `src/DragBehavior.tsx`: drag behavior types and shared rendering helpers. `src/DraggableRenderer.tsx`: the React component (pointer handling, animation). `src/svgx/`: SVG tree utilities (layers, interpolation, transforms, bounds).
 - `src/demos/`: one demo per file (or per folder with an `index.tsx`). A demo's id is its path with `/` turned into `-`, e.g. `animate-algebra/tree-macro.tsx` → `animate-algebra-tree-macro`. `src/demo/list.ts` orders the demos page.
 - `src/demo/`: demo infrastructure (`demo()`, `DemoDraggable`, config panels).
 - `src/study/`: the study pages. `src/studio/`: the studio sections.

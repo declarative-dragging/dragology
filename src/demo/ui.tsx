@@ -557,7 +557,6 @@ export function DemoDraggable<T extends object>({
               height={height}
               onDragStatus={setStatus}
               showDebugOverlay={showDebugOverlay}
-              trace={showDebugOverlay || showTreeView}
               showVaryVisualizer={showVaryVisualizer}
               onDropState={handleDropState}
               onDragState={onDragState}
@@ -610,7 +609,7 @@ export function DemoDraggable<T extends object>({
                         activePath: {draggingStatus.result.activePath}
                       </div>
                       <DragSpecTreeView
-                        spec={draggingStatus.result.tracedSpec}
+                        op={draggingStatus.result.op}
                         activePath={draggingStatus.result.activePath}
                         colorMap={overlayData?.colorMap ?? null}
                         svgWidth={width}
