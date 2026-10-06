@@ -1306,11 +1306,15 @@ function latticeView(
         dragologyZIndex={draggedId === "token" ? "/1" : 1}
         style={{ cursor: "grab" }}
         dragologyOnDrag={() =>
-          // One two-point between per edge; the nearest edge wins. On
-          // reaching a neighbor, snap there and chain into a new drag
+          // One two-point between per edge; the nearest edge wins, and
+          // once the token is partway out an edge it stays on that edge.
+          // On reaching a neighbor, snap there and chain into a new drag
           // from it, so one drag can walk several edges.
           d
-            .closest(moves.map((m) => d.between([m.move.from, m.move.to])))
+            .closest(
+              moves.map((m) => d.between([m.move.from, m.move.to])),
+              { lockPast: 20 },
+            )
             .withSnapRadius(1, { chain: true })
         }
       >
