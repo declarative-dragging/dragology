@@ -1,7 +1,14 @@
 import _ from "lodash";
+import { useState } from "react";
 import { amb, produceAmb } from "../amb";
 import { demo } from "../demo";
-import { DemoDraggable, DemoNotes } from "../demo/ui";
+import {
+  ConfigCheckbox,
+  ConfigPanel,
+  DemoDraggable,
+  DemoNotes,
+  DemoWithConfig,
+} from "../demo/ui";
 import { Draggable } from "../draggable";
 import { translate } from "../svgx/helpers";
 
@@ -153,6 +160,10 @@ const SNAP_OUT = 56;
 
 const TABLE_Y = ZONE_BOX_Y + ZONE_BOX_H + 18;
 const ROW_H = 18;
+// In-table mode, header rows are taller than data rows, to fit a chip.
+const IN_TABLE_HEADER_H = 26;
+const CHIP_INSET_X = 4;
+const CHIP_INSET_Y = (IN_TABLE_HEADER_H - CHIP_H) / 2;
 const ROW_HEADER_W = 76;
 const MAX_CELL_W = 64;
 const MIN_CELL_W = 8;
@@ -183,401 +194,508 @@ function chipColors(field: Field) {
 
 // # Rendering
 
-export const draggable: Draggable<State> = ({ state, d, draggedId }) => {
-  const rowDims = state.zones.rows as Dimension[];
-  const colDims = state.zones.cols as Dimension[];
-  const measures: CellMeasure[] =
-    state.zones.values.length > 0
-      ? (state.zones.values as Measure[])
-      : ["count"];
+type Config = {
+  /** Put the Rows, Columns, and Values chips in the table's corner, beside
+   * the headers they control, rather than in zones above the table. */
+  inTable: boolean;
+};
 
-  // ## Zones & chips
+export const makeDraggable =
+  ({ inTable }: Config): Draggable<State> =>
+  ({ state, d, draggedId }) => {
+    const rowDims = state.zones.rows as Dimension[];
+    const colDims = state.zones.cols as Dimension[];
+    const measures: CellMeasure[] =
+      state.zones.values.length > 0
+        ? (state.zones.values as Measure[])
+        : ["count"];
 
-  const zoneWidths = _.mapValues(state.zones, (fields) =>
-    Math.max(
-      ZONE_MIN_W,
-      ZONE_PAD * 2 + fields.length * CHIP_W + (fields.length - 1) * CHIP_GAP,
-    ),
-  );
-  const zoneXs: { [Z in Zone]?: number } = {};
-  let x = 0;
-  for (const zone of ZONE_ORDER) {
-    zoneXs[zone] = x;
-    x += zoneWidths[zone] + ZONE_GAP;
-  }
+    // ## Table geometry
+    //
+    // By default, every zone is a box above the table. In-table mode keeps
+    // only the Fields pool up there and puts the other chips in the table's
+    // corner, beside the headers they control. From the top, its header rows
+    // are:
+    //   - one row per column field, its chip right-aligned against it (or
+    //     one empty row, holding the Columns slot, when there are none)
+    //   - the measure row, with the Values chips
+    //   - the row-field row, with one chip atop each row-header column
 
-  const chipSpec = (field: Field) => {
-    const zones = allowedZones(field);
-    const candidates = produceAmb(state, (draft) => {
-      for (const zone of ZONE_ORDER) {
-        _.pull(draft.zones[zone], field);
+    const rowTuples = tuplesFor(rowDims);
+    const colTuples = tuplesFor(colDims);
+    const headerRowH = inTable ? IN_TABLE_HEADER_H : ROW_H;
+    const numRowHeaderCols = Math.max(1, rowDims.length);
+    const numColLevelRows = inTable
+      ? Math.max(1, colDims.length)
+      : colDims.length;
+    const showMeasureRow =
+      inTable || measures.length > 1 || colDims.length === 0;
+    const measureRowY = numColLevelRows * headerRowH;
+    const rowFieldRowY = measureRowY + (showMeasureRow ? headerRowH : 0);
+    const headerH = rowFieldRowY + (inTable ? headerRowH : 0);
+
+    const chipsW = (n: number) =>
+      Math.max(1, n) * CHIP_W + Math.max(0, n - 1) * CHIP_GAP;
+    const cornerW = Math.max(
+      numRowHeaderCols * ROW_HEADER_W,
+      inTable ? chipsW(state.zones.values.length) + CHIP_INSET_X * 2 : 0,
+    );
+    const rowHeaderW = cornerW / numRowHeaderCols;
+
+    const numLeafCols = colTuples.length * measures.length;
+    const cellW = _.clamp(
+      (CANVAS_W - cornerW) / numLeafCols,
+      MIN_CELL_W,
+      MAX_CELL_W,
+    );
+    const showCellText = cellW >= MIN_TEXT_CELL_W;
+
+    // Zones drawn as boxes above the table, laid out left to right.
+    const boxZones: Zone[] = inTable ? ["unused"] : ZONE_ORDER;
+    const zoneWidths = _.mapValues(state.zones, (fields) =>
+      Math.max(ZONE_MIN_W, chipsW(fields.length) + ZONE_PAD * 2),
+    );
+    const zoneXs: { [Z in Zone]?: number } = {};
+    let x = 0;
+    for (const zone of boxZones) {
+      zoneXs[zone] = x;
+      x += zoneWidths[zone] + ZONE_GAP;
+    }
+
+    /** Where the chip at index `i` of `zone` sits, in canvas coordinates. */
+    const chipPos = (zone: Zone, i: number): [number, number] => {
+      if (zoneXs[zone] !== undefined) {
+        return [
+          zoneXs[zone] + ZONE_PAD + i * (CHIP_W + CHIP_GAP),
+          ZONE_BOX_Y + ZONE_PAD,
+        ];
       }
-      const zone = amb(zones);
-      const idx = amb(_.range(draft.zones[zone].length + 1));
-      draft.zones[zone].splice(idx, 0, field);
-    });
-    // Zones act as islands: the table only re-pivots once the chip is
-    // near a slot. Far from every slot, the current state stays put, so
-    // dragging across the Rows zone doesn't flip the table halfway.
-    return d
-      .closest(candidates)
-      .whenFar(state, { gapIn: SNAP_IN, gapOut: SNAP_OUT })
-      .withBranchTransition(150)
-      .withFloating({ ghost: { opacity: 0.3 } });
-  };
-
-  // ## Table geometry
-
-  const rowTuples = tuplesFor(rowDims);
-  const colTuples = tuplesFor(colDims);
-  const showMeasureRow = measures.length > 1 || colDims.length === 0;
-  const numRowHeaderCols = Math.max(1, rowDims.length);
-  const numColHeaderRows = colDims.length + (showMeasureRow ? 1 : 0);
-
-  const numLeafCols = colTuples.length * measures.length;
-  const rowHeadersW = numRowHeaderCols * ROW_HEADER_W;
-  const cellW = _.clamp(
-    (CANVAS_W - rowHeadersW) / numLeafCols,
-    MIN_CELL_W,
-    MAX_CELL_W,
-  );
-  const showCellText = cellW >= MIN_TEXT_CELL_W;
-  const colHeadersH = numColHeaderRows * ROW_H;
-
-  // Per-measure maxima, for the heat coloring.
-  const cellValues = new Map<string, number>();
-  const measureMax: { [M in CellMeasure]?: number } = {};
-  rowTuples.forEach((rt) =>
-    colTuples.forEach((ct) =>
-      measures.forEach((m) => {
-        const v = aggregate(rowDims, rt, colDims, ct, m);
-        cellValues.set(`${groupId(rowDims, rt, colDims, ct)}-${m}`, v);
-        measureMax[m] = Math.max(measureMax[m] ?? 0, v);
-      }),
-    ),
-  );
-
-  // Header cells at each level, with their span.
-  const headerCells = (dims: Dimension[], tuples: Tuple[]) => {
-    const cells: {
-      level: number;
-      id: string;
-      label: string;
-      start: number;
-      span: number;
-    }[] = [];
-    dims.forEach((_dim, level) => {
-      let start = 0;
-      while (start < tuples.length) {
-        const prefix = tuples[start].slice(0, level + 1);
-        let end = start;
-        while (
-          end < tuples.length &&
-          _.isEqual(tuples[end].slice(0, level + 1), prefix)
-        ) {
-          end++;
+      switch (zone) {
+        case "cols":
+          return [
+            cornerW - CHIP_INSET_X - CHIP_W,
+            TABLE_Y + i * headerRowH + CHIP_INSET_Y,
+          ];
+        case "values": {
+          const n = state.zones.values.length;
+          return [
+            cornerW - CHIP_INSET_X - chipsW(n) + i * (CHIP_W + CHIP_GAP),
+            TABLE_Y + measureRowY + CHIP_INSET_Y,
+          ];
         }
-        cells.push({
-          level,
-          id: pathId(dims.slice(0, level + 1), prefix),
-          label: prefix[level],
-          start,
-          span: end - start,
-        });
-        start = end;
+        case "rows":
+          return [
+            i * rowHeaderW + CHIP_INSET_X,
+            TABLE_Y + rowFieldRowY + CHIP_INSET_Y,
+          ];
+        case "unused":
+          throw new Error("the Fields pool is always a box");
       }
-    });
-    return cells;
-  };
+    };
 
-  const rowHeaderCells = headerCells(rowDims, rowTuples);
-  const colHeaderCells = headerCells(colDims, colTuples);
+    const chipSpec = (field: Field) => {
+      const zones = allowedZones(field);
+      const candidates = produceAmb(state, (draft) => {
+        for (const zone of ZONE_ORDER) {
+          _.pull(draft.zones[zone], field);
+        }
+        const zone = amb(zones);
+        const idx = amb(_.range(draft.zones[zone].length + 1));
+        draft.zones[zone].splice(idx, 0, field);
+      });
+      // Slots act as islands: the table only re-pivots once the chip is
+      // near one. Far from every slot, the current state stays put, so
+      // dragging across a zone doesn't flip the table halfway.
+      return d
+        .closest(candidates)
+        .whenFar(state, { gapIn: SNAP_IN, gapOut: SNAP_OUT })
+        .withBranchTransition(150)
+        .withFloating({ ghost: { opacity: 0.3 } });
+    };
 
-  const headerFill = (level: number) =>
-    level === 0 ? "#e5e7eb" : level === 1 ? "#eef0f3" : "#f5f6f8";
-
-  return (
-    <g>
-      {/* ## Zones */}
-      {ZONE_ORDER.map((zone) => (
-        <g id={`zone-${zone}`} transform={translate(zoneXs[zone]!, 0)}>
-          <text x={0} y={ZONE_LABEL_Y} fontSize={11} fill="#6b7280">
-            {ZONE_LABELS[zone]}
-          </text>
-          <rect
-            x={0}
-            y={ZONE_BOX_Y}
-            width={zoneWidths[zone]}
-            height={ZONE_BOX_H}
-            rx={5}
-            fill={zone === "unused" ? "#fafafa" : "#f3f4f6"}
-            stroke="#d1d5db"
-            strokeDasharray={zone === "unused" ? "3 3" : undefined}
-          />
-        </g>
-      ))}
-
-      {/* ## Chips */}
-      {ZONE_ORDER.map((zone) =>
-        state.zones[zone].map((field, i) => {
-          const isDragged = draggedId === `chip-${field}`;
-          const { fill, stroke } = chipColors(field);
-          return (
-            <g
-              id={`chip-${field}`}
-              transform={translate(
-                zoneXs[zone]! + ZONE_PAD + i * (CHIP_W + CHIP_GAP),
-                ZONE_BOX_Y + ZONE_PAD,
-              )}
-              dragologyZIndex={isDragged ? "/1" : 1}
-              dragologyOnDrag={() => chipSpec(field)}
-              style={{ cursor: "grab" }}
-            >
-              <rect
-                x={0}
-                y={0}
-                width={CHIP_W}
-                height={CHIP_H}
-                rx={11}
-                fill={fill}
-                stroke={stroke}
-                strokeWidth={isDragged ? 2 : 1}
-              />
-              <text
-                x={CHIP_W / 2}
-                y={CHIP_H / 2}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fontSize={11}
-                fill="#1f2937"
-              >
-                {field}
-              </text>
-            </g>
-          );
+    // Per-measure maxima, for the heat coloring.
+    const cellValues = new Map<string, number>();
+    const measureMax: { [M in CellMeasure]?: number } = {};
+    rowTuples.forEach((rt) =>
+      colTuples.forEach((ct) =>
+        measures.forEach((m) => {
+          const v = aggregate(rowDims, rt, colDims, ct, m);
+          cellValues.set(`${groupId(rowDims, rt, colDims, ct)}-${m}`, v);
+          measureMax[m] = Math.max(measureMax[m] ?? 0, v);
         }),
-      )}
+      ),
+    );
 
-      {/* ## Table */}
-      <g transform={translate(0, TABLE_Y)}>
-        {/* Corner: names of the row fields */}
-        <g id="corner">
-          <rect
-            x={0}
-            y={0}
-            width={rowHeadersW}
-            height={colHeadersH}
-            fill="#f9fafb"
-            stroke="#d1d5db"
-          />
-        </g>
-        {rowDims.map((dim, i) => (
+    // Header cells at each level, with their span.
+    const headerCells = (dims: Dimension[], tuples: Tuple[]) => {
+      const cells: {
+        level: number;
+        id: string;
+        label: string;
+        start: number;
+        span: number;
+      }[] = [];
+      dims.forEach((_dim, level) => {
+        let start = 0;
+        while (start < tuples.length) {
+          const prefix = tuples[start].slice(0, level + 1);
+          let end = start;
+          while (
+            end < tuples.length &&
+            _.isEqual(tuples[end].slice(0, level + 1), prefix)
+          ) {
+            end++;
+          }
+          cells.push({
+            level,
+            id: pathId(dims.slice(0, level + 1), prefix),
+            label: prefix[level],
+            start,
+            span: end - start,
+          });
+          start = end;
+        }
+      });
+      return cells;
+    };
+
+    const rowHeaderCells = headerCells(rowDims, rowTuples);
+    const colHeaderCells = headerCells(colDims, colTuples);
+
+    const headerFill = (level: number) =>
+      level === 0 ? "#e5e7eb" : level === 1 ? "#eef0f3" : "#f5f6f8";
+
+    return (
+      <g>
+        {/* ## Zone boxes */}
+        {boxZones.map((zone) => (
+          <g id={`zone-${zone}`} transform={translate(zoneXs[zone]!, 0)}>
+            <text x={0} y={ZONE_LABEL_Y} fontSize={11} fill="#6b7280">
+              {ZONE_LABELS[zone]}
+            </text>
+            <rect
+              x={0}
+              y={ZONE_BOX_Y}
+              width={zoneWidths[zone]}
+              height={ZONE_BOX_H}
+              rx={5}
+              fill={zone === "unused" ? "#fafafa" : "#f3f4f6"}
+              stroke="#d1d5db"
+              strokeDasharray={zone === "unused" ? "3 3" : undefined}
+            />
+          </g>
+        ))}
+
+        {/* ## Empty slots: where the first chip of an empty zone would go */}
+        {(inTable ? (["cols", "values", "rows"] as const) : []).map((zone) => (
           <g
-            id={`corner-${dim}`}
-            transform={translate(i * ROW_HEADER_W, colHeadersH - ROW_H)}
+            id={`slot-${zone}`}
+            transform={translate(...chipPos(zone, 0))}
+            opacity={state.zones[zone].length === 0 ? 1 : 0}
+            dragologyZIndex={1}
           >
+            <rect
+              x={0}
+              y={0}
+              width={CHIP_W}
+              height={CHIP_H}
+              rx={CHIP_H / 2}
+              fill="white"
+              stroke="#9ca3af"
+              strokeDasharray="3 3"
+            />
             <text
-              x={6}
-              y={ROW_H / 2}
+              x={CHIP_W / 2}
+              y={CHIP_H / 2}
+              textAnchor="middle"
               dominantBaseline="central"
               fontSize={10}
               fontStyle="italic"
-              fill="#6b7280"
+              fill="#9ca3af"
             >
-              {dim}
+              {ZONE_LABELS[zone].toLowerCase()}
             </text>
           </g>
         ))}
 
-        {/* Column headers (dimension levels) */}
-        {colHeaderCells.map((hc) => {
-          const w = hc.span * measures.length * cellW;
-          return (
-            <g
-              id={`ch-${hc.id}`}
-              transform={translate(
-                rowHeadersW + hc.start * measures.length * cellW,
-                hc.level * ROW_H,
-              )}
-            >
-              <rect
-                x={0}
-                y={0}
-                width={w}
-                height={ROW_H}
-                fill={headerFill(hc.level)}
-                stroke="#d1d5db"
-              />
-              {w >= MIN_TEXT_CELL_W && (
+        {/* ## Chips */}
+        {ZONE_ORDER.map((zone) =>
+          state.zones[zone].map((field, i) => {
+            const isDragged = draggedId === `chip-${field}`;
+            const { fill, stroke } = chipColors(field);
+            return (
+              <g
+                id={`chip-${field}`}
+                transform={translate(...chipPos(zone, i))}
+                dragologyZIndex={isDragged ? "/1" : 2}
+                dragologyOnDrag={() => chipSpec(field)}
+                style={{ cursor: "grab" }}
+              >
+                <rect
+                  x={0}
+                  y={0}
+                  width={CHIP_W}
+                  height={CHIP_H}
+                  rx={CHIP_H / 2}
+                  fill={fill}
+                  stroke={stroke}
+                  strokeWidth={isDragged ? 2 : 1}
+                />
                 <text
-                  x={w / 2}
-                  y={ROW_H / 2}
+                  x={CHIP_W / 2}
+                  y={CHIP_H / 2}
                   textAnchor="middle"
                   dominantBaseline="central"
-                  fontSize={10}
-                  fontWeight="bold"
-                  fill="#374151"
+                  fontSize={11}
+                  fill="#1f2937"
                 >
-                  {hc.label}
+                  {field}
                 </text>
-              )}
-            </g>
-          );
-        })}
+              </g>
+            );
+          }),
+        )}
 
-        {/* Column headers (measure level) */}
-        {showMeasureRow &&
-          colTuples.map((ct, ci) =>
-            measures.map((m, mi) => (
+        {/* ## Table */}
+        <g transform={translate(0, TABLE_Y)}>
+          <g id="corner">
+            <rect
+              x={0}
+              y={0}
+              width={cornerW + (inTable ? numLeafCols * cellW : 0)}
+              height={headerH}
+              fill="#f9fafb"
+              stroke="#d1d5db"
+            />
+          </g>
+          {/* Names of the row fields (in-table mode, their chips are there) */}
+          {!inTable &&
+            rowDims.map((dim, i) => (
               <g
-                id={`ch-${pathId(colDims, ct)}-m-${m}`}
+                id={`corner-${dim}`}
+                transform={translate(i * rowHeaderW, headerH - ROW_H)}
+              >
+                <text
+                  x={6}
+                  y={ROW_H / 2}
+                  dominantBaseline="central"
+                  fontSize={10}
+                  fontStyle="italic"
+                  fill="#6b7280"
+                >
+                  {dim}
+                </text>
+              </g>
+            ))}
+
+          {/* Column headers (dimension levels) */}
+          {colHeaderCells.map((hc) => {
+            const w = hc.span * measures.length * cellW;
+            return (
+              <g
+                id={`ch-${hc.id}`}
                 transform={translate(
-                  rowHeadersW + (ci * measures.length + mi) * cellW,
-                  colDims.length * ROW_H,
+                  cornerW + hc.start * measures.length * cellW,
+                  hc.level * headerRowH,
                 )}
               >
                 <rect
                   x={0}
                   y={0}
-                  width={cellW}
-                  height={ROW_H}
-                  fill={headerFill(colDims.length)}
+                  width={w}
+                  height={headerRowH}
+                  fill={headerFill(hc.level)}
                   stroke="#d1d5db"
                 />
-                {showCellText && (
+                {w >= MIN_TEXT_CELL_W && (
                   <text
-                    x={cellW / 2}
-                    y={ROW_H / 2}
+                    x={w / 2}
+                    y={headerRowH / 2}
                     textAnchor="middle"
                     dominantBaseline="central"
                     fontSize={10}
-                    fontStyle={m === "count" ? "italic" : undefined}
+                    fontWeight="bold"
                     fill="#374151"
                   >
-                    {m}
+                    {hc.label}
                   </text>
                 )}
               </g>
-            )),
-          )}
+            );
+          })}
 
-        {/* Row headers */}
-        {rowDims.length === 0 && (
-          <g id="rh-all" transform={translate(0, colHeadersH)}>
-            <rect
-              x={0}
-              y={0}
-              width={ROW_HEADER_W}
-              height={ROW_H}
-              fill="#e5e7eb"
-              stroke="#d1d5db"
-            />
-            <text
-              x={6}
-              y={ROW_H / 2}
-              dominantBaseline="central"
-              fontSize={10}
-              fontWeight="bold"
-              fill="#374151"
-            >
-              All
-            </text>
-          </g>
-        )}
-        {rowHeaderCells.map((hc) => (
-          <g
-            id={`rh-${hc.id}`}
-            transform={translate(
-              hc.level * ROW_HEADER_W,
-              colHeadersH + hc.start * ROW_H,
-            )}
-          >
-            <rect
-              x={0}
-              y={0}
-              width={ROW_HEADER_W}
-              height={hc.span * ROW_H}
-              fill={headerFill(hc.level)}
-              stroke="#d1d5db"
-            />
-            <text
-              x={6}
-              y={ROW_H / 2}
-              dominantBaseline="central"
-              fontSize={10}
-              fontWeight="bold"
-              fill="#374151"
-            >
-              {hc.label}
-            </text>
-          </g>
-        ))}
-
-        {/* Cells */}
-        {rowTuples.map((rt, ri) =>
-          colTuples.map((ct, ci) =>
-            measures.map((m, mi) => {
-              const gid = groupId(rowDims, rt, colDims, ct);
-              const v = cellValues.get(`${gid}-${m}`)!;
-              const t = measureMax[m] ? v / measureMax[m]! : 0;
-              return (
+          {/* Column headers (measure level) */}
+          {showMeasureRow &&
+            colTuples.map((ct, ci) =>
+              measures.map((m, mi) => (
                 <g
-                  id={`cell-${gid}-${m}`}
+                  id={`ch-${pathId(colDims, ct)}-m-${m}`}
                   transform={translate(
-                    rowHeadersW + (ci * measures.length + mi) * cellW,
-                    colHeadersH + ri * ROW_H,
+                    cornerW + (ci * measures.length + mi) * cellW,
+                    measureRowY,
                   )}
                 >
                   <rect
                     x={0}
                     y={0}
                     width={cellW}
-                    height={ROW_H}
-                    fill={heat(m, t)}
-                    stroke="#e5e7eb"
+                    height={headerRowH}
+                    fill={headerFill(colDims.length)}
+                    stroke="#d1d5db"
                   />
                   {showCellText && (
                     <text
-                      x={cellW - 5}
-                      y={ROW_H / 2}
-                      textAnchor="end"
+                      x={cellW / 2}
+                      y={headerRowH / 2}
+                      textAnchor="middle"
                       dominantBaseline="central"
                       fontSize={10}
-                      fill="#1f2937"
+                      fontStyle={m === "count" ? "italic" : undefined}
+                      fill="#374151"
                     >
-                      {v.toLocaleString()}
+                      {m}
                     </text>
                   )}
                 </g>
-              );
-            }),
-          ),
-        )}
+              )),
+            )}
+
+          {/* Row headers */}
+          {rowDims.length === 0 && (
+            <g id="rh-all" transform={translate(0, headerH)}>
+              <rect
+                x={0}
+                y={0}
+                width={rowHeaderW}
+                height={ROW_H}
+                fill="#e5e7eb"
+                stroke="#d1d5db"
+              />
+              <text
+                x={6}
+                y={ROW_H / 2}
+                dominantBaseline="central"
+                fontSize={10}
+                fontWeight="bold"
+                fill="#374151"
+              >
+                All
+              </text>
+            </g>
+          )}
+          {rowHeaderCells.map((hc) => (
+            <g
+              id={`rh-${hc.id}`}
+              transform={translate(
+                hc.level * rowHeaderW,
+                headerH + hc.start * ROW_H,
+              )}
+            >
+              <rect
+                x={0}
+                y={0}
+                width={rowHeaderW}
+                height={hc.span * ROW_H}
+                fill={headerFill(hc.level)}
+                stroke="#d1d5db"
+              />
+              <text
+                x={6}
+                y={ROW_H / 2}
+                dominantBaseline="central"
+                fontSize={10}
+                fontWeight="bold"
+                fill="#374151"
+              >
+                {hc.label}
+              </text>
+            </g>
+          ))}
+
+          {/* Cells */}
+          {rowTuples.map((rt, ri) =>
+            colTuples.map((ct, ci) =>
+              measures.map((m, mi) => {
+                const gid = groupId(rowDims, rt, colDims, ct);
+                const v = cellValues.get(`${gid}-${m}`)!;
+                const t = measureMax[m] ? v / measureMax[m]! : 0;
+                return (
+                  <g
+                    id={`cell-${gid}-${m}`}
+                    transform={translate(
+                      cornerW + (ci * measures.length + mi) * cellW,
+                      headerH + ri * ROW_H,
+                    )}
+                  >
+                    <rect
+                      x={0}
+                      y={0}
+                      width={cellW}
+                      height={ROW_H}
+                      fill={heat(m, t)}
+                      stroke="#e5e7eb"
+                    />
+                    {showCellText && (
+                      <text
+                        x={cellW - 5}
+                        y={ROW_H / 2}
+                        textAnchor="end"
+                        dominantBaseline="central"
+                        fontSize={10}
+                        fill="#1f2937"
+                      >
+                        {v.toLocaleString()}
+                      </text>
+                    )}
+                  </g>
+                );
+              }),
+            ),
+          )}
+        </g>
       </g>
-    </g>
-  );
-};
+    );
+  };
+
+export const draggable = makeDraggable({ inTable: false });
+const inTableDraggable = makeDraggable({ inTable: true });
 
 export default demo(
-  () => (
-    <div>
-      <DemoNotes>
-        A pivot table. Drag field chips between <i>Rows</i>, <i>Columns</i>,{" "}
-        <i>Values</i>, and the unused <i>Fields</i> pool, or reorder them within
-        a zone. The table re-pivots live as a preview. Cells are keyed by their
-        group (which dimension values they aggregate), so a cell keeps its
-        identity — and glides to its new spot — when a dimension moves between
-        Rows and Columns.
-      </DemoNotes>
-      <DemoDraggable
-        draggable={draggable}
-        initialState={initialState}
-        width={CANVAS_W}
-        height={CANVAS_H}
-      />
-    </div>
-  ),
+  () => {
+    const [inTable, setInTable] = useState(false);
+    return (
+      <div>
+        <DemoNotes>
+          A pivot table. Drag field chips between <i>Rows</i>, <i>Columns</i>,{" "}
+          <i>Values</i>, and the unused <i>Fields</i> pool, or reorder them
+          within a zone. The table re-pivots live as a preview. Cells are keyed
+          by their group (which dimension values they aggregate), so a cell
+          keeps its identity — and glides to its new spot — when a dimension
+          moves between Rows and Columns.
+        </DemoNotes>
+        <DemoWithConfig>
+          <DemoDraggable
+            draggable={inTable ? inTableDraggable : draggable}
+            initialState={initialState}
+            width={CANVAS_W}
+            height={CANVAS_H}
+          />
+          <ConfigPanel>
+            <ConfigCheckbox
+              label="Chips in table headers"
+              value={inTable}
+              onChange={setInTable}
+            />
+          </ConfigPanel>
+        </DemoWithConfig>
+      </div>
+    );
+  },
   {
+    fuzz: [
+      { name: "zones", draggable, initialState },
+      { name: "in table", draggable: inTableDraggable, initialState },
+    ],
     tags: [
       "d.closest",
       "spec.withFloating [ghost]",
