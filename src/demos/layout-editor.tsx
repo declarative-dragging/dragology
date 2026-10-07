@@ -1,5 +1,6 @@
 import { produce } from "immer";
 import _ from "lodash";
+import { useLayoutEffect, useRef, useState } from "react";
 import { amb, produceAmb } from "../amb";
 import { demo } from "../demo";
 import { DemoDraggable, DemoNotes } from "../demo/ui";
@@ -569,8 +570,110 @@ const draggable: Draggable<State> = ({ state, d, draggedId }) => {
   );
 };
 
-export default demo(
-  () => (
+// # HTML & CSS
+//
+// The same tree as real HTML and CSS. Rows and columns are flexboxes
+// and grids are CSS grids with `max-content` columns; every box is
+// `width: max-content` (it hugs its content) and nothing stretches,
+// which together reproduce the layout engine above. Borders are
+// outlines, so they don't take up space.
+
+const px = (n: number) => (Math.round(n) === 0 ? "0" : `${Math.round(n)}px`);
+
+function toHtml(node: Node, indent = ""): string {
+  if (node.type === "leaf")
+    return `${indent}<div class="leaf" id="${node.id}"></div>`;
+  if (node.children.length === 0)
+    return `${indent}<div class="box" id="${node.id}"></div>`;
+  return [
+    `${indent}<div class="box" id="${node.id}">`,
+    ...node.children.map((c) => toHtml(c, indent + "  ")),
+    `${indent}</div>`,
+  ].join("\n");
+}
+
+function rule(selector: string, decls: Record<string, string>): string {
+  const body = Object.entries(decls).map(([k, v]) => `  ${k}: ${v};`);
+  return [`${selector} {`, ...body, "}"].join("\n");
+}
+
+function toCss(root: Box): string {
+  const rules = [
+    rule("*", { "box-sizing": "border-box" }),
+    rule(".box", {
+      width: "max-content",
+      "min-width": px(MIN_EMPTY_BOX),
+      "min-height": px(MIN_EMPTY_BOX),
+      "align-items": "start",
+      "justify-items": "start",
+      "border-radius": "6px",
+      background: "rgba(99, 102, 241, 0.08)",
+      outline: "1.5px dashed rgba(99, 102, 241, 0.5)",
+      "outline-offset": "-1.5px",
+    }),
+    rule(".leaf", {
+      "border-radius": "4px",
+      outline: "1px solid rgba(0, 0, 0, 0.25)",
+      "outline-offset": "-1px",
+    }),
+  ];
+  const visit = (node: Node) => {
+    if (node.type === "leaf") {
+      rules.push(
+        rule(`#${node.id}`, {
+          width: px(node.w),
+          height: px(node.h),
+          background: node.color,
+        }),
+      );
+      return;
+    }
+    const n = node.children.length;
+    const layoutDecls: Record<string, string> =
+      node.direction === "row"
+        ? { display: "flex" }
+        : node.direction === "column"
+          ? { display: "flex", "flex-direction": "column" }
+          : {
+              display: "grid",
+              "grid-template-columns": `repeat(${Math.max(1, Math.min(node.cols, n))}, max-content)`,
+            };
+    rules.push(
+      rule(`#${node.id}`, {
+        ...layoutDecls,
+        gap: px(node.gap),
+        padding: px(node.padding),
+      }),
+    );
+    node.children.forEach(visit);
+  };
+  visit(root);
+  return rules.join("\n\n");
+}
+
+/** Renders `html` styled by `css`, in a shadow root so neither leaks. */
+function HtmlPreview({ html, css }: { html: string; css: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const host = ref.current!;
+    const shadow = host.shadowRoot ?? host.attachShadow({ mode: "open" });
+    shadow.innerHTML = `<style>${css}</style>${html}`;
+  }, [html, css]);
+  return <div ref={ref} />;
+}
+
+// Two panels side by side fit the demo page's column.
+const PANEL_W = 344;
+const PANEL_H = 360;
+
+function LayoutEditorDemo() {
+  const [state, setState] = useState(initialState);
+  // The preview state mid-drag, so the HTML follows along.
+  const [live, setLive] = useState<State | null>(null);
+  const shown = live ?? state;
+  const html = toHtml(shown.root);
+  const css = toCss(shown.root);
+  return (
     <div>
       <DemoNotes>
         A layout editor for a CSS-like flex/grid model. The layout engine is the
@@ -580,24 +683,63 @@ export default demo(
         its edge switches direction (right edge = row, bottom = column, corner =
         grid); the small tick in the first gap adjusts the gap; the corner
         bracket adjusts padding; grids have a dot after the first row to change
-        the column count.
+        the column count. Alongside, the same layout as HTML and CSS, rendered
+        by the browser.
       </DemoNotes>
-      <DemoDraggable
-        draggable={draggable}
-        initialState={initialState}
-        width={560}
-        height={480}
-      />
+      <div className="grid grid-cols-2 gap-4 items-start">
+        <div className="flex flex-col gap-1">
+          <div className="text-xs text-slate-500">Editor</div>
+          <DemoDraggable
+            draggable={draggable}
+            state={state}
+            onDropState={(s) => {
+              setLive(null);
+              setState(s);
+            }}
+            onDragState={setLive}
+            width={PANEL_W}
+            height={PANEL_H}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <div className="text-xs text-slate-500">Rendered as HTML</div>
+          <div
+            className="p-5 border border-slate-200 rounded overflow-auto"
+            style={{ width: PANEL_W, height: PANEL_H }}
+          >
+            <HtmlPreview html={html} css={css} />
+          </div>
+        </div>
+        <div className="flex flex-col gap-1 min-w-0">
+          <div className="text-xs text-slate-500">CSS</div>
+          <pre
+            className="text-xs bg-slate-50 border border-slate-200 rounded p-3 overflow-auto"
+            style={{ maxHeight: PANEL_H }}
+          >
+            {css}
+          </pre>
+        </div>
+        <div className="flex flex-col gap-1 min-w-0">
+          <div className="text-xs text-slate-500">HTML</div>
+          <pre
+            className="text-xs bg-slate-50 border border-slate-200 rounded p-3 overflow-auto"
+            style={{ maxHeight: PANEL_H }}
+          >
+            {html}
+          </pre>
+        </div>
+      </div>
     </div>
-  ),
-  {
-    tags: [
-      "d.closest",
-      "d.between",
-      "d.vary [constraint]",
-      "spec.whenFar",
-      "spec.withFloating",
-      "reordering",
-    ],
-  },
-);
+  );
+}
+
+export default demo(LayoutEditorDemo, {
+  tags: [
+    "d.closest",
+    "d.between",
+    "d.vary [constraint]",
+    "spec.whenFar",
+    "spec.withFloating",
+    "reordering",
+  ],
+});
