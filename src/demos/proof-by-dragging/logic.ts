@@ -431,6 +431,20 @@ function reservedIds(state: State, except: Formula | null): Set<string> {
  * state, or null if the link is invalid.
  */
 export function link(state: State, source: Loc, target: Loc): State | null {
+  return linkAndContinue(state, source, target)?.state ?? null;
+}
+
+/**
+ * Like `link`, but also returns `continueId`: the id of the formula
+ * the link rewrote (e.g. the `q` that `p → q` becomes when `p` lands
+ * on it), so that a drag can carry on from it. Null if the link
+ * solved the sequent, leaving nothing to pick up.
+ */
+export function linkAndContinue(
+  state: State,
+  source: Loc,
+  target: Loc,
+): { state: State; continueId: string | null } | null {
   const goal = state.goals.find((g) => g.id === source.goalId);
   if (!goal || target.goalId !== goal.id) return null;
 
@@ -492,10 +506,17 @@ export function link(state: State, source: Loc, target: Loc): State | null {
           ...goal,
           hyps: goal.hyps.map((h, i) => (i === replaced.hypIndex ? result : h)),
         };
-  return commit(
+  const newState = commit(
     state,
     replaceGoal(state.goals, normalizeGoal(newGoal), goal.id),
   );
+
+  // What the link produced: the rewritten formula, if it survived.
+  const produced =
+    result.kind !== "top" &&
+    result.kind !== "bot" &&
+    findLoc(newState, result.id) !== null;
+  return { state: newState, continueId: produced ? result.id : null };
 }
 
 /** Remove trivial hypotheses; solve goals with ⊤ goal or ⊥ hypothesis. */

@@ -18,7 +18,7 @@ import {
   Goal,
   introGoalImp,
   isBinary,
-  link,
+  linkAndContinue,
   linkTargets,
   Loc,
   locFormula,
@@ -219,7 +219,7 @@ function renderFormula(
       id={f.id}
       dragologyZIndex={isDragged ? "/1" : depth}
       dragologyEmergeFrom={f.emergeFrom}
-      dragologyOnDrag={() => dragSpec(ctx, loc)}
+      dragologyOnDrag={isRoot ? () => dragSpec(ctx, loc) : undefined}
     >
       <rect
         x={0}
@@ -246,8 +246,8 @@ function renderFormula(
                 : "none"
         }
         strokeWidth={isDragged || highlighted ? 1.5 : 1}
-        className="hover:fill-stone-200"
-        style={{ cursor: "grab" }}
+        className={isRoot ? "hover:fill-stone-200" : undefined}
+        style={isRoot ? { cursor: "grab" } : undefined}
       />
       {parts}
     </g>
@@ -297,19 +297,32 @@ function dragSpec(ctx: Ctx, source: Loc) {
   // pointer, the innermost wins.
   const targets = _.sortBy(linkTargets(state, source), (t) => -t.path.length);
   const specs = targets.flatMap((t) => {
-    const newState = link(state, source, t);
-    if (!newState) return [];
+    const linked = linkAndContinue(state, source, t);
+    if (!linked) return [];
+    const spec = d
+      .dropTarget(locFormula(goal, t).id, linked.state, { boundsState: state })
+      .withFloating();
+    // Reaching a target links right away, and the drag carries on
+    // with the formula the link rewrote. If the link solved the
+    // sequent, there's nothing left to hold, but the proof step is
+    // still made: the drag chains into just showing the new state,
+    // hung on the undo button since a drag needs some element.
     return [
-      d.dropTarget(locFormula(goal, t).id, newState, { boundsState: state }),
+      linked.continueId
+        ? spec.withChaining({ draggedId: linked.continueId })
+        : spec.withChaining({
+            draggedId: "undo-button",
+            followSpec: d.fixed(linked.state),
+          }),
     ];
   });
   const highlighted: State = {
     ...state,
     highlight: targets.map((t) => locFormula(goal, t).id),
   };
-  const far = d.fixed(highlighted).onDrop(state);
-  if (specs.length === 0) return far.withFloating();
-  return d.closest(specs).withBranchTransition(200).whenFar(far).withFloating();
+  const far = d.fixed(highlighted).onDrop(state).withFloating();
+  if (specs.length === 0) return far;
+  return d.closest(specs).withBranchTransition(200).whenFar(far);
 }
 
 function renderSequent(goal: Goal, ctx: Omit<Ctx, "goal" | "hypIndex">) {
@@ -437,13 +450,17 @@ export default demo(
           Chaudhuri's <em>subformula linking</em>. Each row is a sequent:
           hypotheses ⊢ goal.{" "}
           <b>
-            Drag any subformula onto a matching subformula of opposite polarity
+            Drag a hypothesis or the goal onto a matching subformula of opposite
+            polarity
           </b>{" "}
           (targets light up blue) to link them: the goal (or hypothesis)
-          rewrites, and any new obligations emerge in place. Dropping a
-          hypothesis's disjunct case-splits. Click a highlighted root connective
-          to split a conjunction, introduce an implication, or case on a
-          disjunction. The proof is done when no sequents remain.
+          rewrites, and any new obligations emerge in place. The link happens as
+          soon as you reach the target, and you come away holding what it
+          rewrote, so you can keep going: drag <i>p</i> over <i>p → q</i> and
+          you're now dragging <i>q</i>; if the link finishes the sequent, that's
+          done too. Click a highlighted root connective to split a conjunction,
+          introduce an implication, or case on a disjunction. The proof is done
+          when no sequents remain.
         </DemoNotes>
         <div className="flex flex-col gap-4 items-start">
           <ConfigPanel>
@@ -488,6 +505,7 @@ export default demo(
       "d.fixed",
       "spec.whenFar",
       "spec.withFloating",
+      "spec.withChaining",
       "spec.withBranchTransition",
       "spec.onDrop",
       "dragologyEmergeFrom",
