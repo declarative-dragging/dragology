@@ -10,6 +10,7 @@ import {
   DemoNotes,
 } from "../demo/ui";
 import { Draggable } from "../draggable";
+import { moreThan, param } from "../DragSpec";
 import { Vec2 } from "../math/vec2";
 import { Svgx } from "../svgx";
 import { translate } from "../svgx/helpers";
@@ -31,6 +32,7 @@ import { translate } from "../svgx/helpers";
 // one-line notation of π (perm[i] = π(i+1), values 1-indexed).
 
 type Mode = "free" | "adjacent";
+type PhStyle = "solid" | "schlegel";
 
 /** A letter s_i, or a blank column. Blank columns only exist mid-drag:
  * cancelling s_i s_i first empties the two columns (so nothing to the
@@ -59,6 +61,10 @@ type State = {
   n: number;
   word: Col[];
   mode: Mode;
+  /** How to draw the n = 4 permutohedron, and (as a solid) which way
+   * it's turned. */
+  phStyle: PhStyle;
+  view: View;
   /** Layout hint for the wiring diagram: draw wires with one segment
    * per column instead of one per crossing (see `wirePath`). Set on
    * both ends of a braid drag; dropped, like closed columns, as soon as
@@ -68,7 +74,7 @@ type State = {
 
 // ## Permutation math
 
-function permFromWord(n: number, word: Letter[]): number[] {
+function permFromWord(n: number, word: Col[]): number[] {
   const arr = _.range(1, n + 1);
   for (const i of word) {
     if (typeof i !== "number") continue;
@@ -155,6 +161,31 @@ function isBraidAt(word: Letter[], start: number): boolean {
   );
 }
 
+/** Where the word has a double letter s_i s_i (or two blanks for the
+ * same generator) that the handles treat as a pair: runs of one letter
+ * pair up from the right, so that a pair inserted next to an existing
+ * identical letter is the pair. Returns the index of each pair's first
+ * letter. */
+function doublePairs(word: Letter[]): Set<number> {
+  const same = (a: Letter | undefined, b: Letter) =>
+    a !== undefined &&
+    typeof a === typeof b &&
+    colGenerator(a) === colGenerator(b);
+  const pairs = new Set<number>();
+  let k = 0;
+  while (k < word.length) {
+    let run = 0;
+    while (same(word[k + run], word[k])) run++;
+    if (run >= 2 && run % 2 === 0) {
+      pairs.add(k);
+      k += 2;
+    } else {
+      k += 1;
+    }
+  }
+  return pairs;
+}
+
 /** Apply the braid move s_i s_k s_i = s_k s_i s_k at `word[start..]`. */
 function braidAt(word: Letter[], start: number): Letter[] {
   const w = word.slice();
@@ -203,10 +234,15 @@ function crossingMoves(
 // ## Permutohedron layout
 //
 // Vertices are the permutations of {1..n} as points in R^n (centered);
-// edges join permutations differing by an adjacent transposition. For
+// edges join permutations differing by an adjacent transposition. A
+// permutation π sits at π⁻¹, i.e. coordinate v is the position of v:
+// then swapping adjacent positions swaps two coordinates that differ by
+// 1, which is exactly an edge of the polytope. (Placing π at its
+// one-line vector instead would make some of these pairs diagonals.) For
 // n = 3 that's a hexagon in a plane; for n = 4 it's a truncated
-// octahedron in a 3-space, which we draw as a Schlegel diagram (a
-// perspective projection from just outside one hexagonal face).
+// octahedron in a 3-space, which we draw either as a solid you can turn
+// (below) or as a Schlegel diagram (a perspective projection from just
+// outside one hexagonal face).
 
 type PermutohedronLayout = {
   pos: Map<string, Vec2>; // unit-radius coords keyed by one-line string
@@ -214,6 +250,12 @@ type PermutohedronLayout = {
 };
 
 const permKey = (perm: number[]) => perm.join("");
+
+function inversePerm(perm: number[]): number[] {
+  const inv: number[] = [];
+  perm.forEach((v, i) => (inv[v - 1] = i + 1));
+  return inv;
+}
 
 const permutohedronLayouts = new Map<number, PermutohedronLayout>();
 
@@ -257,7 +299,7 @@ function permutohedronLayout(n: number): PermutohedronLayout {
   }
   const raw = perms.map((perm) => ({
     key: permKey(perm),
-    xy: Vec2(project(perm.map((x) => x - mid))),
+    xy: Vec2(project(inversePerm(perm).map((x) => x - mid))),
   }));
   const R = Math.max(...raw.map(({ xy }) => xy.len()));
   const pos = new Map(raw.map(({ key, xy }) => [key, xy.div(R)]));
@@ -272,6 +314,190 @@ function permutohedronLayout(n: number): PermutohedronLayout {
   const layout = { pos, edges };
   permutohedronLayouts.set(n, layout);
   return layout;
+}
+
+// ### The n = 4 permutohedron as a solid
+//
+// Drawn in 3D instead, the n = 4 permutohedron is a truncated
+// octahedron. The map
+//   x ↦ (x1+x2−x3−x4, x1−x2+x3−x4, x1−x2−x3+x4) / 2
+// (on centered x = π⁻¹) is an isometry from the hyperplane Σx = 0 to
+// R^3, and sends the vertices to the permutations of (0, ±1, ±2). Its 14
+// faces are the facets Σ_{v∈S} π⁻¹(v) = 1 + ⋯ + |S| for nonempty proper
+// subsets S of values: where the first |S| entries of π are S. |S| = 1
+// or 3 gives a hexagon (S_1 × S_3), |S| = 2 a square (S_2 × S_2).
+
+type Vec3 = [number, number, number];
+const dot3 = (u: Vec3, v: Vec3) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+const sub3 = (u: Vec3, v: Vec3): Vec3 => [
+  u[0] - v[0],
+  u[1] - v[1],
+  u[2] - v[2],
+];
+const cross3 = (u: Vec3, v: Vec3): Vec3 => [
+  u[1] * v[2] - u[2] * v[1],
+  u[2] * v[0] - u[0] * v[2],
+  u[0] * v[1] - u[1] * v[0],
+];
+const unit3 = (u: Vec3): Vec3 => {
+  const l = Math.sqrt(dot3(u, u));
+  return [u[0] / l, u[1] / l, u[2] / l];
+};
+
+type Polyhedron = {
+  pos: Map<string, Vec3>; // unit circumradius
+  /** Faces with their vertices in cyclic order. The (outward) normal is
+   * along the centroid, since each facet is symmetric about it. */
+  faces: { id: string; keys: string[]; square: boolean; normal: Vec3 }[];
+  /** For each edge of `permutohedronLayout(4)`, the two faces on it. */
+  edgeFaces: [number, number][];
+};
+
+const polyhedron4: Polyhedron = (() => {
+  const { pos: pos2, edges } = permutohedronLayout(4);
+  const pos = new Map<string, Vec3>();
+  for (const key of pos2.keys()) {
+    const [a, b, c, e] = inversePerm(key.split("").map(Number)).map(
+      (x) => x - 2.5,
+    );
+    const s = 2 * Math.sqrt(5);
+    pos.set(key, [
+      (a + b - c - e) / s,
+      (a - b + c - e) / s,
+      (a - b - c + e) / s,
+    ]);
+  }
+  const faces: Polyhedron["faces"] = [];
+  for (let mask = 1; mask < 15; mask++) {
+    const S = _.range(1, 5).filter((v) => mask & (1 << (v - 1)));
+    const keys = [...pos.keys()].filter((key) =>
+      S.every((v) => key.indexOf(String(v)) < S.length),
+    );
+    const pts = keys.map((key) => pos.get(key)!);
+    const c: Vec3 = [0, 1, 2].map((k) => _.mean(pts.map((p) => p[k]))) as Vec3;
+    const normal = unit3(c);
+    const u = unit3(sub3(pts[0], c));
+    const w = cross3(normal, u);
+    const angle = (p: Vec3) => {
+      const r = sub3(p, c);
+      return Math.atan2(dot3(r, w), dot3(r, u));
+    };
+    faces.push({
+      id: `ph-face-${S.join("")}`,
+      keys: _.sortBy(keys, (key) => angle(pos.get(key)!)),
+      square: S.length === 2,
+      normal,
+    });
+  }
+  const edgeFaces = edges.map(([a, b]) => {
+    const fs = faces.flatMap((f, k) =>
+      f.keys.includes(a) && f.keys.includes(b) ? [k] : [],
+    );
+    return [fs[0], fs[1]] as [number, number];
+  });
+  return { pos, faces, edgeFaces };
+})();
+
+/** A rotation, as a unit quaternion [w, x, y, z]. */
+type Quat = [number, number, number, number];
+
+/** Rotation by `angle` (radians) about the unit vector `axis`. */
+function quatAxisAngle(axis: Vec3, angle: number): Quat {
+  const s = Math.sin(angle / 2);
+  return [Math.cos(angle / 2), axis[0] * s, axis[1] * s, axis[2] * s];
+}
+
+/** `a` after `b`. */
+function quatMul(a: Quat, b: Quat): Quat {
+  const [aw, ax, ay, az] = a;
+  const [bw, bx, by, bz] = b;
+  return [
+    aw * bw - ax * bx - ay * by - az * bz,
+    aw * bx + ax * bw + ay * bz - az * by,
+    aw * by - ax * bz + ay * bw + az * bx,
+    aw * bz + ax * by - ay * bx + az * bw,
+  ];
+}
+
+function quatRotate([w, ...u]: Quat, v: Vec3): Vec3 {
+  // v + 2w (u × v) + 2 u × (u × v)
+  const t = cross3(u as Vec3, v).map((c) => 2 * c) as Vec3;
+  const ut = cross3(u as Vec3, t);
+  return [0, 1, 2].map((k) => v[k] + w * t[k] + ut[k]) as Vec3;
+}
+
+/** How the solid is turned (screen coordinates: x right, y up, z toward
+ * the eye). A drag doesn't vary `orientation` itself: it varies `spin`,
+ * a rotation vector in the screen plane (radians) applied on top, and the
+ * drop folds it in. Turning about screen axes moves any grabbed point in
+ * both directions on screen; Euler angles (yaw about the solid's own
+ * axis) can't move a point near that axis sideways, so drags there
+ * thrashed. */
+type View = { orientation: Quat; spin: { x: number; y: number } };
+
+function viewRotation({ orientation, spin: { x: sx, y: sy } }: View): Quat {
+  const angle = Math.hypot(sx, sy);
+  if (angle === 0) return orientation;
+  return quatMul(
+    quatAxisAngle([sx / angle, sy / angle, 0], angle),
+    orientation,
+  );
+}
+
+const foldSpin = (view: View): View => {
+  const q = viewRotation(view);
+  const len = Math.hypot(...q);
+  return {
+    orientation: q.map((c) => c / len) as Quat,
+    spin: { x: 0, y: 0 },
+  };
+};
+
+const EYE = 4; // eye distance, in circumradii
+
+/** The cosine of the angle between face `k`'s normal and its line of
+ * sight under `view`: positive when the face is turned toward the eye. */
+function faceFacing(view: View, k: number): number {
+  const q = viewRotation(view);
+  const face = polyhedron4.faces[k];
+  const toEye = sub3(
+    [0, 0, EYE],
+    quatRotate(q, polyhedron4.pos.get(face.keys[0])!),
+  );
+  return dot3(quatRotate(q, face.normal), unit3(toEye));
+}
+
+/** Turn the solid by `view` and project it in perspective onto the
+ * screen (unit-ish radius, y down). Also says which faces face the eye. */
+function projectPolyhedron(view: View) {
+  const q = viewRotation(view);
+  const rotate = (v: Vec3) => quatRotate(q, v);
+  const pos = new Map<string, Vec2>();
+  for (const [key, p] of polyhedron4.pos) {
+    const r = rotate(p);
+    const f = EYE / (EYE - r[2]);
+    pos.set(key, Vec2(r[0] * f, -r[1] * f).mul(0.92));
+  }
+  const LIGHT = unit3([-0.5, 0.7, 0.8]);
+  const faces = polyhedron4.faces.map((face, k) => ({
+    ...face,
+    pts: face.keys.map((key) => pos.get(key)!),
+    front: faceFacing(view, k) > 0,
+    light: Math.max(0, dot3(rotate(face.normal), LIGHT)),
+  }));
+  const edgeFront = polyhedron4.edgeFaces.map(
+    ([f, g]) => faces[f].front || faces[g].front,
+  );
+  return { pos, faces, edgeFront };
+}
+
+/** Scale an "#rrggbb" color's channels by `k`. */
+function shade(hex: string, k: number): string {
+  const channel = (i: number) =>
+    Math.round(_.clamp(parseInt(hex.slice(i, i + 2), 16) * k, 0, 255))
+      .toString(16)
+      .padStart(2, "0");
+  return `#${channel(1)}${channel(3)}${channel(5)}`;
 }
 
 // ## Rendering
@@ -352,14 +578,19 @@ function tileContents(v: number, opts: { muted?: boolean } = {}) {
   );
 }
 
-const draggable: Draggable<State> = ({ state: rawState, d, draggedId }) => {
-  const { n, mode } = rawState;
+const draggable: Draggable<State> = ({
+  state: rawState,
+  d,
+  draggedId,
+  isTracking,
+}) => {
+  const { n, mode, phStyle, view } = rawState;
   // `cols` is the layout (may include zero-width closed columns left by
   // a cancel drop); `word` is the logical word all the math and drag
   // specs use, and `state` is the cleaned state they build on.
   const cols = rawState.word;
   const word: Letter[] = cols.filter((c): c is Letter => !isZeroWidth(c));
-  const state: State = { n, word, mode };
+  const state: State = { n, word, mode, phStyle, view };
   const byColumn = (s: State): State => ({ ...s, wiresByColumn: true });
   const perm = permFromWord(n, word);
   const inv = inversions(perm);
@@ -375,6 +606,35 @@ const draggable: Draggable<State> = ({ state: rawState, d, draggedId }) => {
   const COLS = Math.max(13, (n * (n - 1)) / 2 + 4);
   const CAP = COLS - 1; // letters, leaving one spare column
   const canAppend = (k: number) => word.length + k <= CAP;
+
+  // ### Rewrites shared by the wiring diagram and the permutohedron walk
+  /** Insert s_i s_i before logical letter k. The drag starts from
+   * `withClosedAt`, which has two zero-width columns there and is drawn
+   * the same as `state`, so the pair widens from nothing. */
+  const withClosedAt = (k: number, i: number): State => ({
+    ...state,
+    word: [...word.slice(0, k), { closed: i }, { closed: i }, ...word.slice(k)],
+  });
+  const insertAt = (k: number, i: number): State => ({
+    ...state,
+    word: [...word.slice(0, k), i, i, ...word.slice(k)],
+  });
+  /** Cancel the double letter at k, k+1, leaving blanks (drawn flat) so
+   * nothing to the right moves mid-drag. Drag with `.onDrop(closeBlanks)`. */
+  const gappedAt = (k: number): State => ({
+    ...state,
+    word: word.map((l, m) =>
+      m === k || m === k + 1 ? { blank: colGenerator(l) } : l,
+    ),
+  });
+  // blanks become zero-width closed columns, so the drop animation is a
+  // horizontal slide
+  const closeBlanks = (s: State): State => ({
+    ...s,
+    word: s.word.map((l) =>
+      typeof l === "object" && "blank" in l ? { closed: l.blank } : l,
+    ),
+  });
 
   const tileDragSpec = (v: number) => {
     const i = perm.indexOf(v);
@@ -509,13 +769,266 @@ const draggable: Draggable<State> = ({ state: rawState, d, draggedId }) => {
   const phOrigin = Vec2(WIDTH - PH_R - 12, 160);
   const ph: PermutohedronLayout =
     n <= 4 ? permutohedronLayout(n) : { pos: new Map(), edges: [] };
-  // the walk from the identity along the word (a path on the map)
-  const phWalk =
+  const solid = n === 4 && phStyle === "solid" ? projectPolyhedron(view) : null;
+  // The walk from the identity along the word (a path on the map). Its
+  // segments go by layout column, like the wiring diagram's, so a blank
+  // or closed column is a zero-length step and inserting or cancelling
+  // s_i s_i doesn't renumber the steps after it. Its vertices (the
+  // handles) go by logical index.
+  const phStepKeys =
     n <= 4
-      ? _.range(word.length + 1).map(
-          (k) => ph.pos.get(permKey(permFromWord(n, word.slice(0, k))))!,
+      ? _.range(cols.length + 1).map((k) =>
+          permKey(permFromWord(n, cols.slice(0, k))),
         )
       : [];
+  const phVertexKeys =
+    n <= 4
+      ? _.range(word.length + 1).map((k) =>
+          permKey(permFromWord(n, word.slice(0, k))),
+        )
+      : [];
+  const tokenDragSpec = () =>
+    !canAppend(1)
+      ? d.fixed(state)
+      : d
+          .closest(
+            _.range(n - 1).map((i) =>
+              d.between([state, { ...state, word: applyGenerator(word, i) }]),
+            ),
+            // commit to an edge once out on it; the shortest edges are
+            // only ~20px, so lock early
+            { lockPast: 10 },
+          )
+          // targets are close together, so snap late
+          .withSnapRadius(3, { chain: true });
+
+  // ### Rewriting the walk
+  //
+  // The relations of the word are the 2-faces of the permutohedron, so
+  // each rewrite pushes part of the walk across a face:
+  //
+  // - Commutation s_i s_k = s_k s_i: the walk turns a corner of a square.
+  //   Drag the corner vertex diagonally across the square.
+  // - Braid s_i s_k s_i = s_k s_i s_k: the walk goes three sides around a
+  //   hexagon. Drag the middle edge across to the opposite (parallel)
+  //   side; the edges on either side swing around with it.
+  // - s_i s_i = e: the walk goes out along an edge and straight back.
+  //   Push the spur's tip back to where it started.
+  //
+  // There's no rewrite gesture for the reverse, e = s_i s_i. (The token
+  // can still walk out and back, since each of its steps appends.)
+  const walkVertexMoves = (j: number): State[] => {
+    const [a, b] = [word[j - 1], word[j]];
+    if (typeof a !== "number" || typeof b !== "number") return [];
+    if (Math.abs(a - b) >= 2) {
+      const w = word.slice();
+      [w[j - 1], w[j]] = [b, a];
+      return [{ ...state, word: w }];
+    }
+    if (a === b) return [gappedAt(j - 1)];
+    return [];
+  };
+  const walkVertexDragSpec = (j: number) => {
+    const moves = walkVertexMoves(j).map((s) =>
+      d.between([state, s]).onDrop(closeBlanks),
+    );
+    return moves.length === 0 ? d.fixed(state) : d.closest(moves);
+  };
+
+  /** The walk, its rewrite handles, and the token, drawn at `pos`.
+   * `front(a, b)` says whether the edge (or, for a = b, the vertex) is on
+   * the near side; `z` stacks the near and far parts. */
+  const walkLayers = (
+    pos: Map<string, Vec2>,
+    front: (a: string, b: string) => boolean,
+    z: { back: number; front: number; token: number },
+  ) => {
+    const at = (key: string) => pos.get(key)!.mul(PH_R);
+    const tokenKey = permKey(perm);
+    return [
+      // One id'd segment per step so earlier steps never change shape,
+      // plus a zero-length tip segment at the last vertex: when a step is
+      // appended, the tip stretches along the new edge with the token.
+      ...[...phStepKeys, tokenKey].map((key, k) => {
+        if (k === 0) return null;
+        const prev = phStepKeys[k - 1];
+        const isFront = front(prev, key);
+        const blank = k <= cols.length && typeof cols[k - 1] !== "number";
+        return (
+          <line
+            id={`ph-walk-${k - 1}`}
+            {...at(prev).xy1()}
+            {...at(key).xy2()}
+            dragologyZIndex={isFront ? z.front : z.back}
+            stroke="#2563eb"
+            strokeWidth={3}
+            strokeLinecap="round"
+            opacity={blank ? 0 : isFront ? 0.4 : 0.5}
+          />
+        );
+      }),
+      // braid handles: the middle edge of s_i s_k s_i
+      ...wordLetters.map(({ jl: m }) => {
+        if (!isBraidAt(word, m - 1)) return null;
+        const id = `ph-edge-${m}`;
+        const p = at(phVertexKeys[m]);
+        const q = at(phVertexKeys[m + 1]);
+        const mid = p.add(q).div(2);
+        return (
+          <g
+            id={id}
+            transform={translate(mid)}
+            dragologyZIndex={
+              front(phVertexKeys[m], phVertexKeys[m + 1]) ? z.front : z.back
+            }
+            dragologyOnDrag={() =>
+              d.between([
+                byColumn(state),
+                byColumn({ ...state, word: braidAt(word, m - 1) }),
+              ])
+            }
+            style={{ cursor: "grab" }}
+          >
+            <line
+              {...p.sub(mid).xy1()}
+              {...q.sub(mid).xy2()}
+              stroke="#2563eb"
+              strokeWidth={10}
+              strokeLinecap="round"
+              opacity={draggedId === id ? 0.35 : 0}
+              className="plab-hit"
+            />
+          </g>
+        );
+      }),
+      // vertex handles, where there's a move (not the last vertex: that's
+      // the token)
+      ...phVertexKeys.slice(0, -1).map((key, j) => {
+        // (mid-cancel, a spur's tip sits next to a blank with no moves of
+        // its own, but it's the handle being dragged)
+        const midCancel = typeof word[j - 1] === "object";
+        if (walkVertexMoves(j).length === 0 && !midCancel) return null;
+        const id = `ph-v-${j}`;
+        return (
+          <g
+            id={id}
+            transform={translate(at(key))}
+            dragologyZIndex={front(key, key) ? z.front : z.back}
+            dragologyOnDrag={() => walkVertexDragSpec(j)}
+            style={{ cursor: "grab" }}
+          >
+            <circle
+              r={7}
+              fill="#2563eb"
+              opacity={draggedId === id ? 0.35 : 0}
+              className="plab-hit"
+            />
+            <circle r={2.5} fill="#2563eb" opacity={0.7} />
+          </g>
+        );
+      }),
+      <g
+        id="ph-token"
+        transform={translate(at(tokenKey))}
+        dragologyZIndex={z.token}
+        dragologyOnDrag={tokenDragSpec}
+        style={{ cursor: canAppend(1) ? "grab" : "not-allowed" }}
+      >
+        <circle
+          r={8}
+          fill="#2563eb"
+          stroke="white"
+          strokeWidth={2}
+          opacity={front(tokenKey, tokenKey) ? 1 : 0.55}
+        />
+      </g>,
+    ];
+  };
+
+  // The solid: faces, edges, walk and token, stacked by z-index from back
+  // to front, so what's behind shows faintly through the front faces.
+  // Faces are positioned by their centroids so that `d.vary` can follow a
+  // grabbed face as it turns the solid.
+  const solidView = (() => {
+    if (!solid) return null;
+    const edgeFront = new Map(
+      ph.edges.map(([a, b], k) => [`${a}-${b}`, solid.edgeFront[k]]),
+    );
+    const isFront = (a: string, b: string) =>
+      a === b
+        ? solid.faces.some((f) => f.front && f.keys.includes(a))
+        : edgeFront.get(a < b ? `${a}-${b}` : `${b}-${a}`)!;
+    const edgeLines = (front: boolean) =>
+      ph.edges.map(([a, b], k) => (
+        <line
+          {...solid.pos.get(a)!.mul(PH_R).xy1()}
+          {...solid.pos.get(b)!.mul(PH_R).xy2()}
+          stroke={front ? "#475569" : "#64748b"}
+          strokeWidth={front ? 1.25 : 1}
+          strokeDasharray={front ? undefined : "3 3"}
+          opacity={solid.edgeFront[k] === front ? 1 : 0}
+        />
+      ));
+    return (
+      <g id="ph-solid" transform={translate(phOrigin)}>
+        {label("drag a face to turn it", Vec2(-PH_R - 8, PH_R + 24))}
+        {solid.faces.map((face, k) => {
+          const c = face.pts
+            .reduce((acc, p) => acc.add(p))
+            .div(face.pts.length);
+          const rel = face.pts.map((p) => p.sub(c).mul(PH_R));
+          return (
+            <g
+              id={face.id}
+              transform={translate(c.mul(PH_R))}
+              dragologyZIndex={face.front ? 4 : 1}
+              dragologyOnDrag={() => {
+                // Keep the grabbed face turned toward you. Otherwise, past
+                // the silhouette the grabbed point rolls onto the back,
+                // where the same screen position is reached by turning the
+                // other way, and dragging back turns the solid backwards.
+                // With this, the face stops nearly edge-on at the
+                // silhouette and dragging back retraces the turn. (A face
+                // that starts closer to edge-on than that keeps its start.)
+                const minFacing = Math.min(0.1, faceFacing(view, k));
+                return d
+                  .vary(
+                    { ...state, view: foldSpin(view) },
+                    [param("view", "spin", "x"), param("view", "spin", "y")],
+                    {
+                      constraint: (s) =>
+                        moreThan(faceFacing(s.view, k), minFacing),
+                    },
+                  )
+                  .onDrop((s) => ({ ...s, view: foldSpin(s.view) }));
+              }}
+              style={{ cursor: "grab" }}
+            >
+              <path
+                d={`M ${rel.map((p) => `${p.x} ${p.y}`).join(" L ")} Z`}
+                fill={shade(
+                  face.square ? "#f5deb3" : "#d6e0ef",
+                  0.84 + 0.2 * face.light,
+                )}
+                fillOpacity={face.front ? 0.72 : 0}
+              />
+            </g>
+          );
+        })}
+        <g id="ph-edges-back" dragologyZIndex={2}>
+          {edgeLines(false)}
+        </g>
+        <g id="ph-edges-front" dragologyZIndex={5}>
+          {edgeLines(true)}
+        </g>
+        {walkLayers(solid.pos, isFront, { back: 3, front: 6, token: 7 })}
+      </g>
+    );
+  })();
+  // Turning the solid only moves the solid, so that's all the optimizer
+  // needs to see.
+  if (isTracking && draggedId?.startsWith("ph-face-"))
+    return <g>{solidView}</g>;
 
   // ### Wiring diagram
   const RS = 24; // row spacing
@@ -827,8 +1340,10 @@ const draggable: Draggable<State> = ({ state: rawState, d, draggedId }) => {
       {label("row i, column π(i)", matrixOrigin.add(Vec2(0, n * CS + 14)))}
       {/* ## Permutohedron */}
       {label("vertex = π, walk = word", Vec2(WIDTH - 2 * PH_R - 20, 44))}
-      {n <= 4 ? (
-        <g transform={translate(phOrigin)}>
+      {solid ? (
+        solidView
+      ) : n <= 4 ? (
+        <g id="ph-flat" transform={translate(phOrigin)}>
           {ph.edges.map(([a, b]) => (
             <line
               {...ph.pos.get(a)!.mul(PH_R).xy1()}
@@ -837,23 +1352,6 @@ const draggable: Draggable<State> = ({ state: rawState, d, draggedId }) => {
               strokeWidth={1}
             />
           ))}
-          {/* The walk, one id'd segment per step so earlier steps never
-              change shape, plus a zero-length tip segment at the last
-              vertex: when a step is appended, the tip stretches along
-              the new edge with the token. */}
-          {[...phWalk, phWalk[phWalk.length - 1]].map((p, k) =>
-            k === 0 ? null : (
-              <line
-                id={`ph-walk-${k - 1}`}
-                {...phWalk[k - 1].mul(PH_R).xy1()}
-                {...p.mul(PH_R).xy2()}
-                stroke="#2563eb"
-                strokeWidth={3}
-                strokeLinecap="round"
-                opacity={0.3}
-              />
-            ),
-          )}
           {[...ph.pos.entries()].map(([key, p]) => (
             <g transform={translate(p.mul(PH_R))}>
               <circle r={2.5} fill="#9ca3af" />
@@ -871,32 +1369,7 @@ const draggable: Draggable<State> = ({ state: rawState, d, draggedId }) => {
               )}
             </g>
           ))}
-          <g
-            id="ph-token"
-            transform={translate(ph.pos.get(permKey(perm))!.mul(PH_R))}
-            dragologyZIndex={1}
-            dragologyOnDrag={() =>
-              !canAppend(1)
-                ? d.fixed(state)
-                : d
-                    .closest(
-                      _.range(n - 1).map((i) =>
-                        d.between([
-                          state,
-                          { ...state, word: applyGenerator(word, i) },
-                        ]),
-                      ),
-                      // commit to an edge once out on it; the shortest
-                      // edges are only ~20px, so lock early
-                      { lockPast: 10 },
-                    )
-                    // targets are close together, so snap late
-                    .withSnapRadius(3, { chain: true })
-            }
-            style={{ cursor: canAppend(1) ? "grab" : "not-allowed" }}
-          >
-            <circle r={8} fill="#2563eb" stroke="white" strokeWidth={2} />
-          </g>
+          {walkLayers(ph.pos, () => true, { back: 1, front: 1, token: 2 })}
         </g>
       ) : (
         <text
@@ -1044,6 +1517,7 @@ const draggable: Draggable<State> = ({ state: rawState, d, draggedId }) => {
                 : r === letter + 1
                   ? letter
                   : r;
+          const pairs = doublePairs(word);
           let rMut = v - 1;
           let kMut = 0;
           while (kMut <= L) {
@@ -1054,40 +1528,17 @@ const draggable: Draggable<State> = ({ state: rawState, d, draggedId }) => {
             const id = `strand-${v}-${k}`;
             const letter: Letter | null = k < L ? word[k] : null;
             const next = rowAfter(r, letter);
-            // Pair up runs of identical letters from the right, so that a
-            // pair inserted next to an existing identical crossing is the
-            // pair (the apex id must match the one the drag started from).
-            let runLen = 0;
-            while (k + runLen < L && word[k + runLen] === letter) runLen++;
-            if (
-              typeof letter === "number" &&
-              next !== r &&
-              word[k + 1] === letter &&
-              runLen % 2 === 0
-            ) {
+            // (pairing as in `doublePairs`, so the apex id matches the one
+            // an insertion drag started from)
+            if (typeof letter === "number" && next !== r && pairs.has(k)) {
               // apex of a double crossing at logical columns k, k+1
-              const gapped: State = {
-                ...state,
-                word: word.map((l, m) =>
-                  m === k || m === k + 1 ? { blank: colGenerator(l) } : l,
-                ),
-              };
               handles.push(
                 <g
                   id={id}
                   transform={translate(edgeX(k), rowY(next))}
                   dragologyZIndex={1}
                   dragologyOnDrag={() =>
-                    d.between([state, gapped]).onDrop((s) => ({
-                      ...s,
-                      // blanks become zero-width closed columns, so the
-                      // drop animation is a horizontal slide
-                      word: s.word.map((l) =>
-                        typeof l === "object" && "blank" in l
-                          ? { closed: l.blank }
-                          : l,
-                      ),
-                    }))
+                    d.between([state, gappedAt(k)]).onDrop(closeBlanks)
                   }
                   style={{ cursor: "ns-resize" }}
                 >
@@ -1141,19 +1592,6 @@ const draggable: Draggable<State> = ({ state: rawState, d, draggedId }) => {
               // morphing in place. The handle sits at the column's right
               // edge, which is where the new apex ends up, so the drag is
               // purely vertical; the hit rect covers the column.
-              const withClosed = (i: number): State => ({
-                ...state,
-                word: [
-                  ...word.slice(0, k),
-                  { closed: i },
-                  { closed: i },
-                  ...word.slice(k),
-                ],
-              });
-              const insert = (i: number): State => ({
-                ...state,
-                word: [...word.slice(0, k), i, i, ...word.slice(k)],
-              });
               handles.push(
                 <g
                   id={id}
@@ -1169,12 +1607,15 @@ const draggable: Draggable<State> = ({ state: rawState, d, draggedId }) => {
                         ? braided
                         : r > 0 &&
                           canAppend(2) &&
-                          d.between([withClosed(r - 1), insert(r - 1)]),
+                          d.between([
+                            withClosedAt(k, r - 1),
+                            insertAt(k, r - 1),
+                          ]),
                       braidSide === "below"
                         ? braided
                         : r < n - 1 &&
                           canAppend(2) &&
-                          d.between([withClosed(r), insert(r)]),
+                          d.between([withClosedAt(k, r), insertAt(k, r)]),
                     ]);
                   }}
                   style={{ cursor: "ns-resize" }}
@@ -1201,6 +1642,16 @@ const draggable: Draggable<State> = ({ state: rawState, d, draggedId }) => {
   );
 };
 
+// turned so the walk to the initial permutation is in front
+const INITIAL_VIEW: View = {
+  // yaw 160° about the vertical, then pitch −35° about the horizontal
+  orientation: quatMul(
+    quatAxisAngle([1, 0, 0], (-35 * Math.PI) / 180),
+    quatAxisAngle([0, 1, 0], (160 * Math.PI) / 180),
+  ),
+  spin: { x: 0, y: 0 },
+};
+
 const INITIAL_PERMS: Record<number, number[]> = {
   3: [2, 3, 1],
   4: [3, 1, 4, 2],
@@ -1212,6 +1663,7 @@ export default demo(
   () => {
     const [n, setN] = useState(4);
     const [mode, setMode] = useState<Mode>("adjacent");
+    const [phStyle, setPhStyle] = useState<PhStyle>("solid");
     const [resetCount, setResetCount] = useState(0);
     return (
       <div>
@@ -1231,7 +1683,12 @@ export default demo(
           drag the apex of such a double crossing back to cancel it. The
           permutohedron (n ≤ 4) maps every permutation to a vertex, with edges
           for adjacent transpositions; drag the token along edges to walk (and
-          write) a word.
+          write) a word. Push the walk across a face to rewrite the word the
+          same ways: drag a corner across a square to commute, or the middle of
+          three edges around a hexagon across it to braid; where the walk goes
+          out along an edge and straight back, push the tip back to cancel the s
+          <sub>i</sub>s<sub>i</sub>. For n = 4 the permutohedron is a truncated
+          octahedron: drag a face to turn it.
         </DemoNotes>
         <div className="flex flex-wrap items-start gap-6 bg-gray-50 rounded p-3 mb-3 text-xs">
           <ConfigSelect
@@ -1249,6 +1706,15 @@ export default demo(
               adjacent: "adjacent transpositions only (chained)",
             }}
           />
+          <ConfigRadio
+            label="Permutohedron (n = 4)"
+            value={phStyle}
+            onChange={setPhStyle}
+            options={{
+              solid: "solid (drag a face to turn it)",
+              schlegel: "Schlegel diagram",
+            }}
+          />
           <button
             className="text-xs border border-gray-300 rounded px-2 py-1 bg-white hover:bg-gray-100"
             onClick={() => setResetCount((c) => c + 1)}
@@ -1264,8 +1730,10 @@ export default demo(
             // start somewhere interesting; reset goes to the identity
             word: resetCount === 0 ? wordFromPerm(INITIAL_PERMS[n]) : [],
             mode,
+            phStyle,
+            view: INITIAL_VIEW,
           }}
-          stateOverride={{ mode }}
+          stateOverride={{ mode, phStyle }}
           width={WIDTH}
           height={HEIGHT}
         />
@@ -1273,9 +1741,27 @@ export default demo(
     );
   },
   {
+    // The Schlegel diagram and n = 3 are only reachable from the config
+    // panel.
+    fuzz: [
+      { name: "solid", n: 4, phStyle: "solid" as const },
+      { name: "schlegel", n: 4, phStyle: "schlegel" as const },
+      { name: "n3", n: 3, phStyle: "solid" as const },
+    ].map(({ name, n, phStyle }) => ({
+      name,
+      draggable,
+      initialState: {
+        n,
+        word: wordFromPerm(INITIAL_PERMS[n]),
+        mode: "adjacent" as const,
+        phStyle,
+        view: INITIAL_VIEW,
+      },
+    })),
     tags: [
       "d.between",
       "d.closest",
+      "d.vary",
       "spec.whenFar",
       "spec.withFloating",
       "spec.withSnapRadius [chain]",
