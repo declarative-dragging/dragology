@@ -1602,21 +1602,29 @@ const draggable: Draggable<State> = ({
                       byColumn(state),
                       byColumn({ ...state, word: braidAt(word, k - 1) }),
                     ]);
-                    return d.closest([
-                      braidSide === "above"
-                        ? braided
-                        : r > 0 &&
-                          canAppend(2) &&
-                          d.between([
-                            withClosedAt(k, r - 1),
-                            insertAt(k, r - 1),
-                          ]),
-                      braidSide === "below"
-                        ? braided
-                        : r < n - 1 &&
-                          canAppend(2) &&
-                          d.between([withClosedAt(k, r), insertAt(k, r)]),
-                    ]);
+                    // The branches only trade places where the strand
+                    // crosses its start row, where both look like `state`,
+                    // so switch instantly: their wire paths have different
+                    // segment structures (zero-width columns on different
+                    // wires, or by-column layout), and blending them
+                    // kinks the neighbors.
+                    return d
+                      .closest([
+                        braidSide === "above"
+                          ? braided
+                          : r > 0 &&
+                            canAppend(2) &&
+                            d.between([
+                              withClosedAt(k, r - 1),
+                              insertAt(k, r - 1),
+                            ]),
+                        braidSide === "below"
+                          ? braided
+                          : r < n - 1 &&
+                            canAppend(2) &&
+                            d.between([withClosedAt(k, r), insertAt(k, r)]),
+                      ])
+                      .withBranchTransition(false);
                   }}
                   style={{ cursor: "ns-resize" }}
                 >
