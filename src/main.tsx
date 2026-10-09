@@ -7,6 +7,7 @@ import { SingleDemoPage } from "./demo/SingleDemoPage";
 import "./index.css";
 import { IndexPage } from "./IndexPage";
 import { NaturalNeighborTestPage } from "./NaturalNeighborTestPage";
+import { RetroPage } from "./retro/RetroPage";
 import { StudioPage } from "./studio/StudioPage";
 import { SingleStudyPage } from "./study/SingleStudyPage";
 import { StudyPage } from "./study/StudyPage";
@@ -43,6 +44,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         {autoRoute("/natural-neighbor", NaturalNeighborTestPage)}
         {autoRoute("/studio", StudioPage)}
         {autoRoute("/studio/:filter", StudioPage)}
+        {autoRoute("/retro", RetroPage)}
       </Routes>
     </HashRouter>
   </React.StrictMode>,

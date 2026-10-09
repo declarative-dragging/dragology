@@ -24,6 +24,7 @@ export default [
       "src/demo/**",
       "src/demos/**",
       "src/docs/**",
+      "src/retro/**",
       "src/studio/**",
       "src/study/**",
       "src/IndexPage.tsx",
