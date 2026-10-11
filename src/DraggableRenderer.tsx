@@ -261,6 +261,12 @@ function DraggableRendererControlled<T extends object>({
   const onDragStateRef = useRef(onDragState);
   onDragStateRef.current = onDragState;
 
+  // A drag that ends on the element it started on would also fire a
+  // click there (React keeps the element mounted through the drag), so
+  // the click that follows a drop is swallowed. Cleared on the next
+  // pointerdown in case that click never comes.
+  const suppressClickRef = useRef(false);
+
   const [svgElem, setSvgElem] = useState<SVGSVGElement | null>(null);
 
   const setPointerFromEvent = useCallback(
@@ -382,6 +388,7 @@ function DraggableRendererControlled<T extends object>({
       }
 
       if (status.type !== "dragging") return;
+      suppressClickRef.current = true;
       const pointer = setPointerFromEvent(e);
 
       const frame: DragFrame = { pointer };
@@ -465,6 +472,14 @@ function DraggableRendererControlled<T extends object>({
         userSelect: "none",
         touchAction: "none",
         ...(simulateDrag ? { pointerEvents: "none" } : {}),
+      }}
+      onPointerDownCapture={() => {
+        suppressClickRef.current = false;
+      }}
+      onClickCapture={(e) => {
+        if (!suppressClickRef.current) return;
+        suppressClickRef.current = false;
+        e.stopPropagation();
       }}
     >
       {drawn.layers}
