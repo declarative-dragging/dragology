@@ -101,6 +101,7 @@ export const demoList: DemoListEntry[] = [
   "controlled",
   "simple-triangle-custom",
   "with-pointer-delay",
+  "change-frame",
   "component-elements",
   "component-elements-lerp",
   {
