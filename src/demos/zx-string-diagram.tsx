@@ -1220,13 +1220,16 @@ export default demo(
     return (
       <>
         <DemoNotes>
-          A ZX-calculus string diagram editor where every drag is a rewrite
-          rule. <b>Drag spiders</b> past each other (interchange), <b>drop</b>{" "}
-          one on an adjacent same-colored spider (fusion; a bare phase-0 spider
-          drops on any neighbor: identity), <b>Alt-drag</b> out of a spider
-          (unfusion), <b>drag a phase label</b> onto a same-colored neighbor,{" "}
-          <b>drag a wire's bead</b> sideways (and through a twin wire: Hopf),
-          and <b>drag a cup past its cap</b> (snake).
+          <p className="mb-2 font-bold">⚠️ Just a seed!</p>
+          <p>
+            A ZX-calculus string diagram editor where every drag is a rewrite
+            rule. <b>Drag spiders</b> past each other (interchange), <b>drop</b>{" "}
+            one on an adjacent same-colored spider (fusion; a bare phase-0
+            spider drops on any neighbor: identity), <b>Alt-drag</b> out of a
+            spider (unfusion), <b>drag a phase label</b> onto a same-colored
+            neighbor, <b>drag a wire's bead</b> sideways (and through a twin
+            wire: Hopf), and <b>drag a cup past its cap</b> (snake).
+          </p>
         </DemoNotes>
         <div className="flex flex-wrap gap-2 mb-3 items-center">
           {PUZZLE_ORDER.map((id) => (

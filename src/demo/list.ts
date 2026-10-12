@@ -113,6 +113,8 @@ export const demoList: DemoListEntry[] = [
       "tableaux",
       "layout-editor",
       "zx-string-diagram",
+      "frobenius-algebra",
+      "frobenius-tangle",
       "git-graph-surgery",
       "lambda-beta",
       "pivot-table",
