@@ -486,7 +486,7 @@ function DraggableRendererControlled<T extends object>({
       {drawn.portals}
       {status.type === "dragging" && showDebugOverlay && pointer && (
         <ErrorBoundary>
-          <OverlayVis op={status.result.op} pointer={pointer} />
+          <OverlayVis op={status.result.op} />
         </ErrorBoundary>
       )}
       {simulateDrag && pointerOverrideRef.current && (

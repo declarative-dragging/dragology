@@ -175,7 +175,7 @@ class ClosestOp<T extends object> extends Operator<T> {
     );
   }
 
-  overlayVis({ pointer, active }: OpOverlayVisProps) {
+  overlayVis({ active }: OpOverlayVisProps) {
     if (this.frames === 0) return null;
     return (
       <g>
@@ -185,7 +185,6 @@ class ClosestOp<T extends object> extends Operator<T> {
               <OverlayVis
                 key={i}
                 op={option.op}
-                pointer={pointer}
                 active={active && i === this.lastBest}
               />
             ),

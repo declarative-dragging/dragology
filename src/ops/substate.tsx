@@ -90,7 +90,7 @@ class SubstateOp<T extends object> extends Operator<T> {
     );
   }
 
-  overlayVis({ pointer, active }: OpOverlayVisProps) {
-    return <OverlayVis op={this.inner.op} pointer={pointer} active={active} />;
+  overlayVis({ active }: OpOverlayVisProps) {
+    return <OverlayVis op={this.inner.op} active={active} />;
   }
 }

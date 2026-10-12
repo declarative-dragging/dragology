@@ -510,6 +510,6 @@ An operator that isn't a modifier extends `Operator` directly, and `operator(You
 Operators also draw themselves in the debug views (the "Spec tree" and "Overlay" toggles on the demo page):
 
 - `treeView(props)` returns the op's node in the spec tree, usually a `Box` with `path={props.path}`, containing `child.treeView(props)` for each child.
-- `overlayVis(props)` returns SVG marks on the canvas, including its children's, drawn with `<OverlayVis op={child.op} pointer={props.pointer} active={props.active} />`.
+- `overlayVis(props)` returns SVG marks on the canvas, including its children's, drawn with `<OverlayVis op={child.op} active={props.active} />`. To draw against the pointer, use `this.lastFrame.pointer`, the pointer this op was last given. So a modifier that remaps the pointer (like `ShiftPointer`) needs no `overlayVis` of its own: its wrapped spec already draws against the remapped pointer.
 
 Both are called as plain functions, so they can't use hooks. They read the op's fields, which hold whatever its last frame left there. `Modifier` provides both: a box labeled with the op's `name` around the wrapped spec's node, and the wrapped spec's marks. Override them to show more, e.g. `treeView(props) { return this.wrapperView(props, `${this.dx}px`); }`. For marks of your own, `DistanceLine` draws a labeled gap, and `OutputThumbnail` and `StateThumbnails` show rendered states in the tree.

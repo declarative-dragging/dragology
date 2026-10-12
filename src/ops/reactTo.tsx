@@ -84,9 +84,9 @@ class ReactToOp<T extends object> extends Operator<T> {
     );
   }
 
-  overlayVis({ pointer, active }: OpOverlayVisProps) {
+  overlayVis({ active }: OpOverlayVisProps) {
     return this.current ? (
-      <OverlayVis op={this.current.op} pointer={pointer} active={active} />
+      <OverlayVis op={this.current.op} active={active} />
     ) : null;
   }
 }

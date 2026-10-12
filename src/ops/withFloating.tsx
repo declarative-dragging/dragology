@@ -203,12 +203,13 @@ class WithFloatingOp<T extends object> extends Modifier<T> {
     );
   }
 
-  overlayVis({ pointer, active, opacity }: OpOverlayVisProps) {
-    if (this.frames === 0) return null;
+  overlayVis({ active, opacity }: OpOverlayVisProps) {
+    if (!this.lastFrame) return null;
+    const { pointer } = this.lastFrame;
     const elementPos = this.elementPos;
     return (
       <g>
-        <OverlayVis op={this.inner.op} pointer={pointer} active={active} />
+        <OverlayVis op={this.inner.op} active={active} />
         {elementPos && (
           <g opacity={opacity}>
             <circle cx={elementPos.x} cy={elementPos.y} r={5} fill="magenta" />

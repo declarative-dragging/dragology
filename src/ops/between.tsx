@@ -224,19 +224,15 @@ class BetweenOp<T extends object> extends Operator<T> {
     );
   }
 
-  overlayVis({ pointer, active, opacity }: OpOverlayVisProps) {
-    const { projection, delaunay } = this;
-    if (!projection || !delaunay) return null;
+  overlayVis({ active, opacity }: OpOverlayVisProps) {
+    const { projection, delaunay, lastFrame } = this;
+    if (!projection || !delaunay || !lastFrame) return null;
+    const { pointer } = lastFrame;
     const projDist = pointer.dist(projection.projectedPt);
     return (
       <g>
         {this.branches.map((branch, i) => (
-          <OverlayVis
-            key={`sub-${i}`}
-            op={branch.op}
-            pointer={pointer}
-            active={false}
-          />
+          <OverlayVis key={`sub-${i}`} op={branch.op} active={false} />
         ))}
         <g opacity={opacity}>
           {delaunay.triangles().map((tri, i) => {

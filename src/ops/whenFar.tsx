@@ -88,12 +88,11 @@ class WhenFarOp<T extends object> extends Operator<T> {
     );
   }
 
-  overlayVis({ pointer, active }: OpOverlayVisProps) {
+  overlayVis({ active }: OpOverlayVisProps) {
     if (this.frames === 0) return null;
     const foreground = (
       <OverlayVis
         op={this.foreground.op}
-        pointer={pointer}
         active={active && this.inForeground}
       />
     );
@@ -101,7 +100,7 @@ class WhenFarOp<T extends object> extends Operator<T> {
     return (
       <g>
         {foreground}
-        <OverlayVis op={this.background.op} pointer={pointer} active={active} />
+        <OverlayVis op={this.background.op} active={active} />
       </g>
     );
   }

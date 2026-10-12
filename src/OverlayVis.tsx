@@ -3,19 +3,20 @@ import { Vec2 } from "./math/vec2";
 import type { Operator } from "./op";
 import { StudioHackContext } from "./studio/StudioHackContext";
 
-/** Debug overlay component for a running op tree + pointer position. */
+/**
+ * Debug overlay component for a running op tree. Each op draws from its
+ * last frame, so against the pointer it was given.
+ */
 export function OverlayVis<T extends object>({
   op,
-  pointer,
   active = true,
 }: {
   op: Operator<T>;
-  pointer: Vec2;
   active?: boolean;
 }) {
   const { overlayFullOpacity } = useContext(StudioHackContext);
   const opacity = overlayFullOpacity ? 1 : active ? 0.8 : 0.2;
-  return op.overlayVis({ pointer, active, opacity });
+  return op.overlayVis({ active, opacity });
 }
 
 /** A dashed line labeled with a distance, for showing gaps. */

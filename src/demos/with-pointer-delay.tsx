@@ -60,12 +60,7 @@ const pointerDelay = modifier(
       const delayedPointer = this.log[0].pointer;
       return (
         <g>
-          {/* The wrapped spec's marks measure from the pointer it sees. */}
-          <OverlayVis
-            op={this.inner.op}
-            pointer={delayedPointer}
-            active={active}
-          />
+          <OverlayVis op={this.inner.op} active={active} />
           <g opacity={opacity}>
             <polyline
               points={this.log

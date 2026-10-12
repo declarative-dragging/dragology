@@ -48,7 +48,6 @@ export type OpTreeViewProps = {
 
 /** What an op's `overlayVis` gets, to draw on the debug overlay. */
 export type OpOverlayVisProps = {
-  pointer: Vec2;
   /** Whether this node is on the drag's active branch. */
   active: boolean;
   /** Opacity for marks this node draws itself. */
@@ -74,6 +73,11 @@ export abstract class Operator<T extends object> {
   readonly children: Child<T>[] = [];
   /** How many frames this op has run. */
   frames = 0;
+  /**
+   * The frame this op last ran with, as it was given (after any
+   * parent remapped the pointer). Debug views draw against it.
+   */
+  lastFrame: DragFrame | undefined;
 
   constructor(readonly ctx: DragInitContext<T>) {}
 
@@ -103,7 +107,9 @@ export abstract class Operator<T extends object> {
 
   /**
    * Draw this op's marks on the debug overlay, including its
-   * children's. Like `treeView`, it can't use hooks.
+   * children's. Like `treeView`, it can't use hooks. Marks measured
+   * against the pointer should use `this.lastFrame`'s, which is the
+   * one this op was given.
    */
   abstract overlayVis(props: OpOverlayVisProps): ReactNode;
 
@@ -137,8 +143,8 @@ export abstract class Modifier<T extends object> extends Operator<T> {
     return this.wrapperView(props);
   }
 
-  overlayVis({ pointer, active }: OpOverlayVisProps): ReactNode {
-    return <OverlayVis op={this.inner.op} pointer={pointer} active={active} />;
+  overlayVis({ active }: OpOverlayVisProps): ReactNode {
+    return <OverlayVis op={this.inner.op} active={active} />;
   }
 
   /**
@@ -198,6 +204,7 @@ export function opBehavior<T extends object>(op: Operator<T>): DragBehavior<T> {
   return (frame) => {
     const { activePath, ...result } = op.frame(frame);
     op.frames++;
+    op.lastFrame = frame;
     return { ...result, activePath: joinPath(op.name, activePath), op };
   };
 }

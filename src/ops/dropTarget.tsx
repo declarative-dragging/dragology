@@ -105,9 +105,10 @@ class DropTargetOp<T extends object> extends Operator<T> {
     );
   }
 
-  overlayVis({ pointer, opacity }: OpOverlayVisProps) {
+  overlayVis({ opacity }: OpOverlayVisProps) {
     const bounds = this.globalBounds;
-    if (this.frames === 0 || bounds.empty) return null;
+    if (!this.lastFrame || bounds.empty) return null;
+    const { pointer } = this.lastFrame;
     return (
       <g opacity={opacity}>
         <rect

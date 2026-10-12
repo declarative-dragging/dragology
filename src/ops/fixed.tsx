@@ -67,9 +67,10 @@ class FixedOp<T extends object> extends Operator<T> {
     return <FixedTreeNode op={this} {...props} />;
   }
 
-  overlayVis({ pointer, opacity }: OpOverlayVisProps) {
+  overlayVis({ opacity }: OpOverlayVisProps) {
     const pos = this.position;
-    if (this.frames === 0 || !pos) return null;
+    if (!this.lastFrame || !pos) return null;
+    const { pointer } = this.lastFrame;
     return (
       <g opacity={opacity}>
         <circle

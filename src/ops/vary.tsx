@@ -244,8 +244,9 @@ class VaryOp<T extends object> extends Operator<T> {
     );
   }
 
-  overlayVis({ pointer, opacity }: OpOverlayVisProps) {
-    if (!this.rendered) return null;
+  overlayVis({ opacity }: OpOverlayVisProps) {
+    if (!this.rendered || !this.lastFrame) return null;
+    const { pointer } = this.lastFrame;
     const pos = this.rendered.position;
     const distance = pointer.dist(pos);
     return (
