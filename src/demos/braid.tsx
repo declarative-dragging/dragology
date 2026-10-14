@@ -1,7 +1,12 @@
 import _ from "lodash";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { demo } from "../demo";
-import { ConfigSelect, DemoDraggable, DemoNotes } from "../demo/ui";
+import {
+  ConfigCheckbox,
+  ConfigSelect,
+  DemoDraggable,
+  DemoNotes,
+} from "../demo/ui";
 import { Draggable } from "../draggable";
 import { inOrder, param } from "../DragSpec";
 import { Vec2 } from "../math/vec2";
@@ -39,6 +44,29 @@ import { assertDefined } from "../utils/assert";
 // before the crossing) passes over when the sign is +1, under when it's
 // −1. `permFromWord` applies the letters left to right to the identity;
 // the result lists the strand in each row at the right end.
+//
+// ## Closure
+//
+// Closed up, each strand's right end loops around below the diagram and
+// back to its left end, and the braid is drawn as a link, its closure.
+// By Markov's theorem, two braids close up to the same link exactly when
+// they're related by the braid relations and two more moves, which the
+// closure adds:
+//
+// - conjugation, β ~ αβα⁻¹: the last crossing can be dragged on around
+//   its loop and in at the front, or the first one back around to the
+//   end. With the cancelling pairs, that makes every conjugation.
+// - stabilization, β ~ β σ_n^{±1} ∈ B_{n+1}: the bottom strand can be
+//   pulled down at the right end of the diagram into a new strand, with
+//   a new loop, that it crosses once at the end of the word (σ_n): a
+//   Reidemeister I kink in the closure. Pulled down at the left end, the
+//   crossing goes at the front instead (σ_n⁻¹, which conjugation can take
+//   around to the end). Pulling that innermost loop back in is
+//   destabilization.
+//
+// Strands are colored by the link component they belong to, and the
+// colors are kept in the state, so a move that renumbers the strands
+// (they're numbered by row at the left end) keeps them.
 
 type Sign = 1 | -1;
 
@@ -67,8 +95,17 @@ type Letter = { i: number; sign: Sign };
  * turn angle, so that a strand's end moves steadily with it: under an
  * angle, it barely moves at the start and end of the turn, and dragging
  * it stalls there and then lurches.) It's only ever the last column,
- * while you turn one strand around another at the end. */
-type Col = Letter & { gap?: "blank" | "closed" | "pending"; p?: number };
+ * while you turn one strand around another at the end.
+ *
+ * A *flat* letter is a crossing with no width, which swaps its strands
+ * all the same. It's only ever the first letter, starting a
+ * stabilization at the front of the word (see `stabilizeSpec`), where
+ * the strands have to be numbered as they will be once it's in. */
+type Col = Letter & {
+  gap?: "blank" | "closed" | "pending";
+  p?: number;
+  flat?: true;
+};
 
 const isLetter = (c: Col) => c.gap === undefined;
 const isClosed = (c: Col) => c.gap === "closed";
@@ -88,10 +125,27 @@ type State = {
   /** Where the pointer is along the diagram, when it's over it: the
    * cross-section shows that moment. */
   hoverX?: number;
+  /** Also mark that moment on the diagram, with a line and the points
+   * where it cuts the strands. (A display option, set from outside.) */
+  showMoment?: boolean;
   /** The last letter is a crossing still being turned in the
    * cross-section, past halfway: the drag that made it can still turn
    * it back. Only means anything mid-drag; see `turnSpec`. */
   open?: true;
+  /** Draw the closure, with the Markov moves. */
+  closure?: true;
+  /** The color of each strand's component, for the closure; see
+   * `recolor`. */
+  palette?: number[];
+  /** Mid-(de)stabilization, at one end of the drag: the last row lies
+   * on the one above it, with the strand that runs along it hidden, so
+   * that it's drawn the same as the braid without them. */
+  newRow?: { strand: number };
+  /** Mid-conjugation: the word's last crossing is `t` of the way around
+   * its loop to the front (0 to 1), where the word with that crossing
+   * moved to the front takes over. `id` is the dragged handle's. Only
+   * ever mid-drag; see `orbitSpec`. */
+  orbit?: { t: number; id: string };
 };
 
 // ## Braid math
@@ -201,6 +255,134 @@ function crossingMoves(
     moves.push({ word: braidAt(n, word, j - 1), braid: true });
   return moves;
 }
+
+/** A color for each strand's link component in the closure (a strand
+ * that ends in row r continues as strand r+1), keeping the colors in
+ * `hint` where it can: a component takes the hinted color of its
+ * lowest-numbered strand, unless an earlier component has it. Gaps count
+ * as the letters they stand in for (pairs of them cancel anyway), so
+ * mid-drag states are colored like the states they lead to. */
+function recolor(n: number, cols: Col[], hint: number[] | undefined) {
+  const arr = _.range(1, n + 1);
+  for (const c of cols) {
+    if (isPending(c) && assertDefined(c.p) <= 0.5) continue;
+    [arr[c.i], arr[c.i + 1]] = [arr[c.i + 1], arr[c.i]];
+  }
+  const palette: number[] = [];
+  const used = new Set<number>();
+  for (let v = 1; v <= n; v++) {
+    if (palette[v - 1] !== undefined) continue;
+    const hinted = hint?.[v - 1];
+    const color =
+      hinted !== undefined && !used.has(hinted)
+        ? hinted
+        : assertDefined(_.range(COLORS.length).find((k) => !used.has(k)));
+    used.add(color);
+    for (let u = v; palette[u - 1] === undefined; u = arr.indexOf(u) + 1) {
+      palette[u - 1] = color;
+    }
+  }
+  return palette;
+}
+
+/** The colors of the strands once letter `x` moves from one end of the
+ * word to the other: the two strands in its rows trade numbers. */
+function swapColors(palette: number[] | undefined, x: Letter) {
+  const p = palette?.slice();
+  if (p) [p[x.i], p[x.i + 1]] = [p[x.i + 1], p[x.i]];
+  return p;
+}
+
+/** The word with its last letter moved to the front, colors and all. */
+function rotated(word: Letter[], palette: number[] | undefined) {
+  const x = assertDefined(word.at(-1));
+  return { word: [x, ...word.slice(0, -1)], palette: swapColors(palette, x) };
+}
+
+/** A path of lines and arcs, measured by length along it. */
+type Seg =
+  | { kind: "line"; a: Vec2; b: Vec2; len: number }
+  | { kind: "arc"; c: Vec2; r: number; a0: number; a1: number; len: number };
+
+class Track {
+  readonly segs: Seg[] = [];
+  length = 0;
+  private at0: Vec2;
+
+  constructor(start: Vec2) {
+    this.at0 = start;
+  }
+
+  private get end(): Vec2 {
+    const s = this.segs.at(-1);
+    return s ? this.segAt(s, s.len) : this.at0;
+  }
+
+  lineTo(b: Vec2) {
+    const a = this.end;
+    const len = a.dist(b);
+    this.segs.push({ kind: "line", a, b, len });
+    this.length += len;
+    return this;
+  }
+
+  /** An arc around `c` from angle a0 to a1 (radians, y down). */
+  arc(c: Vec2, r: number, a0: number, a1: number) {
+    const len = r * Math.abs(a1 - a0);
+    this.segs.push({ kind: "arc", c, r, a0, a1, len });
+    this.length += len;
+    return this;
+  }
+
+  private segAt(s: Seg, d: number): Vec2 {
+    if (s.kind === "line") return s.a.lerp(s.b, s.len === 0 ? 0 : d / s.len);
+    const a = s.a0 + (s.a1 - s.a0) * (s.len === 0 ? 0 : d / s.len);
+    return Vec2(s.c.x + s.r * Math.cos(a), s.c.y + s.r * Math.sin(a));
+  }
+
+  at(d: number): Vec2 {
+    let rest = _.clamp(d, 0, this.length);
+    for (const s of this.segs) {
+      if (rest <= s.len) return this.segAt(s, rest);
+      rest -= s.len;
+    }
+    return this.end;
+  }
+
+  /** Points along the track from d0 to d1 (d0 ≤ d1): the ends, the
+   * corners between, and enough points around arcs to draw them. */
+  points(d0: number, d1: number): Vec2[] {
+    const pts = [this.at(d0)];
+    let start = 0;
+    for (const s of this.segs) {
+      const lo = Math.max(d0, start);
+      const hi = Math.min(d1, start + s.len);
+      if (hi > lo && s.kind === "arc") {
+        const steps = Math.ceil((hi - lo) / 4);
+        for (let k = 1; k < steps; k++) {
+          pts.push(this.segAt(s, lo - start + ((hi - lo) * k) / steps));
+        }
+      }
+      if (start + s.len > lo && start + s.len < d1) {
+        pts.push(this.segAt(s, s.len));
+      }
+      start += s.len;
+    }
+    pts.push(this.at(d1));
+    return pts;
+  }
+}
+
+const polyline = (pts: Vec2[]) => pts.map((p) => `L ${p.x} ${p.y}`).join(" ");
+
+/** The bezier parameter's samples across a crossing drawn along two
+ * tracks: how far along it is (`f`) and how far across (`q`), matching
+ * the cubic a column draws, from (0, 0) via (½, 0) and (½, 1) to
+ * (1, 1). */
+const CROSS_SAMPLES = _.range(0, 17).map((k) => {
+  const s = k / 16;
+  return { f: 1.5 * s * (1 - s) + s * s * s, q: 3 * s * s - 2 * s * s * s };
+});
 
 // ## Rendering
 
@@ -321,13 +503,37 @@ const PANEL_W = 100; // the cross-section's width
 const DEPTH = (0.96 * PANEL_W) / (2 * 0.8 * RS);
 const heightFor = (n: number) => 52 + n * RS + 56;
 
+// The closure's loops: each row's runs STUB to the right of the diagram,
+// down, back along under it and up its left side, and in. The bottom
+// row's loop is innermost and each one above it is LS further out. The
+// top corners have radius RT; the bottom ones share their centers. The
+// diagram has room for MAX_N rows of loops, so stabilizing never
+// changes the layout.
+const MAX_N = 6;
+const CLOSURE_COLS = 14;
+const LS = 12;
+const STUB = 14;
+const RT = 8;
+const RB = 8;
+const LOOP_MARGIN = STUB + (MAX_N - 1) * LS + 4;
+const CLOSURE_HEIGHT = 52 + (MAX_N - 1) * (RS + LS) + RT + RB + 2 + 16;
+
 const draggable: Draggable<State> = ({
-  state: rawState,
+  state: givenState,
   d,
   draggedId,
   setState,
 }) => {
-  const { n } = rawState;
+  // Past halfway, a conjugation is drawn as the word with the crossing
+  // moved to the front, coming in from behind.
+  const rawState: State =
+    givenState.orbit && givenState.orbit.t >= 0.5
+      ? {
+          ...givenState,
+          ...rotated(givenState.word as Letter[], givenState.palette),
+        }
+      : givenState;
+  const { n, closure, orbit } = rawState;
   // `cols` is the layout (may include zero-width closed columns left by
   // a cancel drop); `word` is the logical word all the math and drag
   // specs use, and `state` is the cleaned state they build on.
@@ -335,15 +541,20 @@ const draggable: Draggable<State> = ({
   const word: Letter[] = cols
     .filter(inWord)
     .map(({ i, sign }) => ({ i, sign }));
-  const state: State = { n, word };
+  const palette = closure ? recolor(n, cols, rawState.palette) : undefined;
+  const state: State = { n, word, closure, palette };
   const byColumn = (s: State, braid: number): State => ({
     ...s,
     wiresByColumn: { braid },
   });
   const perm = permFromWord(n, word);
   const L = word.length;
+  const strandColor = (v: number) =>
+    palette ? COLORS[palette[v - 1]] : colorOf(v);
+  // (a strand coming out of the row above hides until it's out)
+  const strandOpacity = (v: number) => (rawState.newRow?.strand === v ? 0 : 1);
 
-  const COLS = colsFor(n);
+  const COLS = closure ? CLOSURE_COLS : colsFor(n);
   const CAP = COLS - 1; // letters, leaving one spare column
   const canAppend = (k: number) => L + k <= CAP;
   // Full, as shown: a crossing being turned counts once it's past
@@ -465,22 +676,100 @@ const draggable: Draggable<State> = ({
 
   // ### The diagram
   // (room above for the cross-section's near corner, which the
-  // perspective puts above the top row)
-  const diagramOrigin = Vec2(48, 52);
+  // perspective puts above the top row, and around the closure for its
+  // loops)
+  const diagramOrigin = Vec2(closure ? LOOP_MARGIN + 4 : 48, 52);
   const rawLen = cols.length; // layout columns (incl. blank and closed)
-  // (room on the right for the end labels and the cross-section)
-  const CW = (WIDTH - diagramOrigin.x - 44 - PANEL_W - 16) / COLS; // column width
+  // (room on the right for the end labels or loops, and the cross-section)
+  const rightMargin = closure ? LOOP_MARGIN + 12 : 44;
+  const CW = (WIDTH - diagramOrigin.x - rightMargin - PANEL_W - 16) / COLS; // column width
   const wireX0 = 0;
   const wireX1 = wireX0 + COLS * CW;
-  const rowY = (r: number) => r * RS;
+  // (how far the last row is below the one above it, in rows)
+  const grow = rawState.newRow ? 0 : 1;
+  const rowY = (r: number) =>
+    RS * (Math.min(r, n - 2) + Math.max(0, r - (n - 2)) * grow);
+
+  // #### Loops
+  const lastRow = n - 1;
+  const yB0 = rowY(lastRow) + RT + RB + 2;
+  /** How far row r's loop is outside the innermost one (the bottom
+   * row's; mid-stabilization, the bottom two start out together). */
+  const loopOff = (r: number) => {
+    const l = lastRow - r;
+    return (l <= 1 ? l * grow : l - 1 + grow) * LS;
+  };
+  /** Row r's loop, from (xStart, its row) on the right around to (xEnd,
+   * row `rEnd`) on the left. (Only a crossing being turned in the
+   * cross-section, at the end of the word, ends strands between rows.
+   * Their loops take them back in at the nearest row.) */
+  const loopTrack = (r: number, xStart: number, xEnd: number, rEnd = r) => {
+    const y = rowY(r);
+    const yEnd = rowY(rEnd);
+    const off = loopOff(r);
+    const xR = wireX1 + STUB + off;
+    const xL = wireX0 - STUB - off;
+    const yB = yB0 + off;
+    const rb = RB + off;
+    return new Track(Vec2(xStart, y))
+      .lineTo(Vec2(xR - RT, y))
+      .arc(Vec2(xR - RT, y + RT), RT, -Math.PI / 2, 0)
+      .lineTo(Vec2(xR, yB - rb))
+      .arc(Vec2(xR - rb, yB - rb), rb, 0, Math.PI / 2)
+      .lineTo(Vec2(xL + rb, yB))
+      .arc(Vec2(xL + rb, yB - rb), rb, Math.PI / 2, Math.PI)
+      .lineTo(Vec2(xL, yEnd + RT))
+      .arc(Vec2(xL + RT, yEnd + RT), RT, Math.PI, (3 * Math.PI) / 2)
+      .lineTo(Vec2(xEnd, yEnd));
+  };
+
+  // #### Conjugation
+  // The crossing on its way around (`orbit`) is drawn along the loops of
+  // its two rows, the same distance along each, but it stays in the word
+  // as the last letter (before halfway) or the first (after), so that
+  // everything else is drawn just as in that word, ids and all: dropped,
+  // it slides back into its column. Its loops start at the right edge of
+  // the rest of the word. At the front, it has a column of its own
+  // (`shift` wide) that opens up as it comes in, pushing the word over.
+  const disp = (() => {
+    if (!orbit) return null;
+    const into = orbit.t >= 0.5;
+    const j = into ? 0 : rawLen - 1;
+    const { i } = cols[j];
+    const restW = (rawLen - 1) * CW;
+    const lens = [i, i + 1].map(
+      (r) => loopTrack(r, wireX0 + restW, wireX0).length,
+    );
+    const midLen = (lens[0] + lens[1]) / 2;
+    const shift = into ? _.clamp(CW - (1 - orbit.t) * (midLen - CW), 0, CW) : 0;
+    const x0 = wireX0 + shift;
+    const tracks = [i, i + 1].map((r) => loopTrack(r, x0 + restW, x0));
+    const s0 = lens.map((len) => orbit.t * (len - CW));
+    /** The crossing drawn along the tracks, from track k to the other. */
+    const crossPts = (k: number) =>
+      CROSS_SAMPLES.map(({ f, q }) =>
+        tracks[k]
+          .at(s0[k] + f * CW)
+          .lerp(tracks[1 - k].at(s0[1 - k] + f * CW), q),
+      );
+    const center = tracks[0]
+      .at(s0[0] + CW / 2)
+      .lerp(tracks[1].at(s0[1] + CW / 2), 0.5);
+    // how far along the loops the right edge of the diagram is
+    const seam = wireX1 - (x0 + restW);
+    return { into, j, i, shift, tracks, s0, crossPts, center, seam };
+  })();
+
   const colW = (j: number) =>
-    j >= rawLen
-      ? CW
-      : isClosed(cols[j])
-        ? 0
-        : isPending(cols[j])
-          ? assertDefined(cols[j].p) * CW
-          : CW;
+    disp?.into && j === 0
+      ? disp.shift
+      : j >= rawLen
+        ? CW
+        : isClosed(cols[j]) || cols[j].flat
+          ? 0
+          : isPending(cols[j])
+            ? assertDefined(cols[j].p) * CW
+            : CW;
   const colX = (j: number) =>
     wireX0 +
     _.sum(_.range(Math.min(j, rawLen)).map(colW)) +
@@ -494,20 +783,30 @@ const draggable: Draggable<State> = ({
   // (suffixed if a pair meets twice). Gaps take ids too, so a pair's id
   // survives its cancellation. `j` is the layout column, `jl` the index
   // in the logical word.
+  //
+  // A crossing's handle is numbered without the closed columns, though:
+  // a drag starts from the cleaned state, which has none, and its
+  // handle has to be there. (A closed column stays on after a drop,
+  // until the next drag.)
   const columns = (() => {
-    const seen = new Set<string>();
-    const take = (a: number, b: number) => {
-      let pairId = pairKey(a, b);
-      while (seen.has(pairId)) pairId += "x";
-      seen.add(pairId);
-      return pairId;
+    const numberer = () => {
+      const seen = new Set<string>();
+      return (a: number, b: number) => {
+        let pairId = pairKey(a, b);
+        while (seen.has(pairId)) pairId += "x";
+        seen.add(pairId);
+        return pairId;
+      };
     };
+    const take = numberer();
+    const takeHandle = numberer();
     let jl = 0;
     const out = cols.map((c, j) => ({
       c,
       j,
       jl: inWord(c) ? jl++ : -1,
       pairId: take(xs[j].a, xs[j].b),
+      handleId: isClosed(c) ? "" : takeHandle(xs[j].a, xs[j].b),
     }));
     return {
       letters: out.filter(({ c }) => isLetter(c)),
@@ -558,38 +857,84 @@ const draggable: Draggable<State> = ({
         ? 1
         : 0;
 
+  /** Strand v's pieces, and the row it ends in (between rows mid-turn). */
   const wirePieces = (v: number) => {
     const pieces: { key: string; d: string; z: number }[] = [];
     let r = v - 1;
-    let from = `${wireX0 - 14} ${rowY(r)}`;
-    const piece = (x: number, w: number, r1: number, z: number) => {
-      const y0 = rowY(r);
-      const y1 = rowY(r1);
-      pieces.push({
-        key: String(pieces.length),
-        d: `M ${from} L ${x} ${y0} C ${x + w / 2} ${y0} ${x + w / 2} ${y1} ${x + w} ${y1}`,
-        z,
-      });
-      from = `${x + w} ${y1}`;
-      r = r1;
-    };
-    cols.forEach((c, j) => {
-      if (!rawState.wiresByColumn && r !== c.i && r !== c.i + 1) return;
+    // the path since the last piece
+    let from = `M ${closure ? wireX0 : wireX0 - 14} ${rowY(r)}`;
+    const push = (d: string, z: number) =>
+      pieces.push({ key: String(pieces.length), d, z });
+    // (set once the strand is on a loop, past the conjugated crossing)
+    let onTrack: Track | null = null;
+    let trackFrom = 0;
+    for (const [j, c] of cols.entries()) {
+      if (!rawState.wiresByColumn && r !== c.i && r !== c.i + 1) continue;
       // (a pending crossing ends partway, where its half-turn has got to)
       const r1 = isPending(c)
         ? r +
           (rowAfterCol(r, { ...c, gap: undefined }) - r) * assertDefined(c.p)
         : rowAfterCol(r, c);
-      piece(colX(j), colW(j), r1, pieceZ(v, j));
-    });
+      const z = pieceZ(v, j);
+      if (disp && j === disp.j) {
+        const k = r === disp.i ? 0 : 1;
+        const other = disp.tracks[1 - k];
+        const pts = disp.crossPts(k);
+        const after = disp.s0[1 - k] + CW;
+        if (disp.into) {
+          // just the crossing, then on around the loop to the next piece
+          push(`M ${pts[0].x} ${pts[0].y} ${polyline(pts.slice(1))}`, z);
+          from = `M ${pts.at(-1)!.x} ${pts.at(-1)!.y} ${polyline(other.points(after, other.length))}`;
+        } else {
+          // the run out along the loop to the crossing, and the crossing
+          const run = disp.tracks[k].points(0, disp.s0[k]);
+          push(`${from} ${polyline(run)} ${polyline(pts)}`, z);
+          from = `M ${pts.at(-1)!.x} ${pts.at(-1)!.y}`;
+          onTrack = other;
+          trackFrom = after;
+        }
+        r = r1;
+        continue;
+      }
+      const x = colX(j);
+      const w = colW(j);
+      const y0 = rowY(r);
+      const y1 = rowY(r1);
+      push(
+        `${from} L ${x} ${y0} C ${x + w / 2} ${y0} ${x + w / 2} ${y1} ${x + w} ${y1}`,
+        z,
+      );
+      from = `M ${x + w} ${y1}`;
+      r = r1;
+    }
     // (keyed apart from the column pieces, so that a column piece added
     // at the end doesn't take over the free run)
     pieces.push({
       key: "free",
-      d: `M ${from} L ${wireX1 + 14} ${rowY(r)}`,
+      d: onTrack
+        ? `${from} ${polyline(onTrack.points(trackFrom, Math.max(trackFrom, disp!.seam)))}`
+        : `${from} L ${closure ? wireX1 : wireX1 + 14} ${rowY(r)}`,
       z: 0,
     });
-    return pieces;
+    return { pieces, endRow: r };
+  };
+
+  /** The closure's loop out of row r (at the right; between rows
+   * mid-turn), on to its left end. */
+  const loopPath = (r: number) => {
+    const k = disp ? r - disp.i : -1;
+    let pts: Vec2[];
+    if (disp && (k === 0 || k === 1)) {
+      const tr = disp.tracks[k];
+      const s = disp.s0[k];
+      pts = disp.into
+        ? tr.points(disp.seam, Math.max(disp.seam, s))
+        : tr.points(Math.max(disp.seam, s + CW), tr.length);
+    } else {
+      const tr = loopTrack(r, wireX1, wireX0, Math.round(r));
+      pts = tr.points(0, tr.length);
+    }
+    return `M ${pts[0].x} ${pts[0].y} ${polyline(pts.slice(1))}`;
   };
 
   // ### Cross-section
@@ -613,6 +958,15 @@ const draggable: Draggable<State> = ({
         break;
       }
       if (!isLetter(c)) continue;
+      if (disp && !disp.into && j === disp.j) {
+        // (the crossing going out around the loops is only as far through
+        // as it has got by the right edge)
+        const done = _.clamp((disp.seam - _.mean(disp.s0)) / CW, 0, 1);
+        if (done < 1) {
+          turning = { j, theta: thetaAt(done) };
+          break;
+        }
+      }
       if (x >= x0 + colW(j)) {
         [arr[c.i], arr[c.i + 1]] = [arr[c.i + 1], arr[c.i]];
         continue;
@@ -644,10 +998,11 @@ const draggable: Draggable<State> = ({
   // the viewer) is on the right and nearer, its back on the left,
   // foreshortened. The depth-0 line is drawn at full scale, so resting
   // points line up with the strands' rows.
-  const panelX = wireX1 + 44;
+  const panelX = wireX1 + rightMargin;
   const PERSPECTIVE = 0.5;
-  const midRow = (n - 1) / 2;
-  const project = (row: number, depth: number) => {
+  const midY = (rowY(0) + rowY(lastRow)) / 2;
+  /** Where height y (as in the diagram) at a depth is drawn. */
+  const project = (y: number, depth: number) => {
     const u = 0.5 - depth / (2 * DEPTH); // 0 front, 1 back
     const s = (1 + PERSPECTIVE / 2) / (1 + PERSPECTIVE * u);
     return {
@@ -655,7 +1010,7 @@ const draggable: Draggable<State> = ({
         panelX +
           PANEL_W -
           (PANEL_W * u * (1 + PERSPECTIVE)) / (1 + PERSPECTIVE * u),
-        rowY(midRow + (row - midRow) * s),
+        midY + (y - midY) * s,
       ),
       scale: s,
     };
@@ -680,10 +1035,10 @@ const draggable: Draggable<State> = ({
   const turnVary = (base: Letter[], l: Letter, p: number, settled: State) => {
     const k = base.length;
     const turning: State = {
-      n,
+      ...state,
       word: [...base, { ...l, gap: "pending", p }],
     };
-    const done: State = { n, word: [...base, l], open: true };
+    const done: State = { ...state, word: [...base, l], open: true };
     return d
       .vary(turning, [param("word", k, "p")], {
         constraint: (s) => inOrder([0, assertDefined(s.word[k].p), 1]),
@@ -706,7 +1061,7 @@ const draggable: Draggable<State> = ({
    * point is. */
   const unwindSpec = (l: Letter) => {
     const prev = word.slice(0, -1);
-    return turnVary(prev, l, 0.5, { n, word: prev });
+    return turnVary(prev, l, 0.5, { ...state, word: prev });
   };
 
   /** Turn strand `v` half a turn around its neighbor in row `r2`, passing
@@ -730,15 +1085,105 @@ const draggable: Draggable<State> = ({
     return turnVary(word, l, 0, state);
   };
 
+  // ### Markov moves
+  /** Conjugate by dragging crossing `id`, the last letter of `sWord`
+   * (colored by `sPalette`), around its loops, starting `t` of the way
+   * from the end of the word (0) to the front (1). Dropped, it goes to
+   * whichever is nearer. */
+  const orbitSpec = (
+    sWord: Letter[],
+    sPalette: number[] | undefined,
+    t: number,
+    id: string,
+  ) =>
+    d
+      .vary(
+        { ...state, word: sWord, palette: sPalette, orbit: { t, id } },
+        param("orbit", "t"),
+        { constraint: (s) => inOrder([0, assertDefined(s.orbit).t, 1]) },
+      )
+      .onDrop(({ orbit: o, ...s }) =>
+        assertDefined(o).t < 0.5
+          ? s
+          : { ...s, ...rotated(s.word as Letter[], s.palette) },
+      );
+
+  // Stabilizing pulls the bottom strand down, at either end of the
+  // braid, into a new row and around a new innermost loop, crossing the
+  // new strand coming out of it at that end of the word. The strand
+  // pulled passes in front: at the right end, the one going into the new
+  // row (σ_n, appended); at the left end, the new one coming out of it
+  // (σ_n⁻¹, prepended). It starts from a state drawn just like this one,
+  // with the new row (and its loop) on top of the bottom one, its strand
+  // hidden, and the crossing in a column with no width: closed at the
+  // end, flat at the front (where it renumbers the strands).
+  // Destabilizing undoes that kink, Reidemeister I style, by pulling the
+  // innermost loop back in, when the bottom row's strand crosses only
+  // once, at either end of the word. (It doesn't matter which strand
+  // passes in front.)
+  const stabilizeSpec = (atEnd: boolean) => {
+    if (!palette || n >= MAX_N || !canAppend(1)) return null;
+    const l: Letter = { i: n - 1, sign: atEnd ? 1 : -1 };
+    const color = palette[(atEnd ? perm[n - 1] : n) - 1];
+    const grown: State = {
+      ...state,
+      n: n + 1,
+      word: atEnd ? [...word, l] : [l, ...word],
+      palette: [...palette, color],
+    };
+    const start: State = {
+      ...grown,
+      word: atEnd
+        ? [...word, { ...l, gap: "closed" }]
+        : [{ ...l, flat: true }, ...word],
+      newRow: { strand: atEnd ? n + 1 : n },
+    };
+    return d.between([start, grown]).onDrop((s) => (s.newRow ? state : s));
+  };
+  /** Which end of the word the bottom row's only crossing is at, if it
+   * has only one, at an end. */
+  const kinkEnd = (() => {
+    if (!palette || n < 2) return null;
+    const ks = _.range(L).filter((k) => word[k].i === n - 2);
+    return ks.length !== 1
+      ? null
+      : ks[0] === L - 1
+        ? "end"
+        : ks[0] === 0
+          ? "front"
+          : null;
+  })();
+  const destabilizeSpec = () => {
+    if (!palette || kinkEnd === null) return null;
+    const atEnd = kinkEnd === "end";
+    const k = atEnd ? L - 1 : 0;
+    const shrunk: State = {
+      ...state,
+      word: word.map((l, m) =>
+        m !== k ? l : atEnd ? { ...l, gap: "closed" } : { ...l, flat: true },
+      ),
+      newRow: { strand: atEnd ? n : n - 1 },
+    };
+    const gone: State = {
+      ...state,
+      n: n - 1,
+      word: atEnd ? word.slice(0, -1) : word.slice(1),
+      palette: palette.slice(0, -1),
+    };
+    return d.between([state, shrunk]).onDrop((s) => (s.newRow ? gone : s));
+  };
+
   // Hover highlights on handles, but not mid-drag, when other handles
   // pass under the pointer. (Handles are layers, lifted out of any group
   // a class could go on, so each one carries it.)
   const hitClass = draggedId === null ? "braid-hit" : undefined;
 
   // ### Word
-  // One letter under each crossing, so letters travel with their
-  // crossings.
-  const wordY = rowY(n - 1) + 34;
+  // One letter under each crossing (over it, in the closure, whose loops
+  // are underneath), so letters travel with their crossings.
+  const wordY = closure ? -34 : rowY(n - 1) + 34;
+
+  const strands = _.range(1, n + 1).map((v) => ({ v, ...wirePieces(v) }));
 
   return (
     <g>
@@ -747,38 +1192,53 @@ const draggable: Draggable<State> = ({
       `}</style>
       {/* ## Diagram */}
       <g transform={translate(diagramOrigin)}>
-        {_.range(1, n + 1).map((v) => (
-          <g>
-            <text
-              transform={translate(wireX0 - 22, rowY(v - 1))}
-              textAnchor="middle"
-              dominantBaseline="central"
-              fontSize={11}
-              fill="#6b7280"
-              fontFamily="system-ui, sans-serif"
-            >
-              {v}
-            </text>
-            {/* the strand's end label (moving with a crossing being
+        {/* in the closure, a faint box marks off the braid from its loops */}
+        {closure && (
+          <rect
+            transform={translate(wireX0, rowY(0) - 0.5 * RS)}
+            width={wireX1 - wireX0}
+            height={rowY(lastRow) - rowY(0) + 0.9 * RS}
+            rx={4}
+            fill="none"
+            stroke="#cbd5e1"
+            strokeWidth={1}
+          />
+        )}
+        {/* (in the closure, the strands' ends are joined, and their
+            numbers don't say much) */}
+        {!closure &&
+          _.range(1, n + 1).map((v) => (
+            <g>
+              <text
+                transform={translate(wireX0 - 22, rowY(v - 1))}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={11}
+                fill="#6b7280"
+                fontFamily="system-ui, sans-serif"
+              >
+                {v}
+              </text>
+              {/* the strand's end label (moving with a crossing being
                 turned in the cross-section) */}
-            <text
-              id={`wire-end-${v}`}
-              transform={translate(wireX1 + 22, rowY(endConfig.get(v)!.row))}
-              textAnchor="middle"
-              dominantBaseline="central"
-              fontSize={11}
-              fontWeight={600}
-              fill={colorOf(v).stroke}
-              fontFamily="system-ui, sans-serif"
-            >
-              {v}
-            </text>
-          </g>
-        ))}
-        {_.range(1, n + 1).flatMap((v) =>
+              <text
+                id={`wire-end-${v}`}
+                transform={translate(wireX1 + 22, rowY(endConfig.get(v)!.row))}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={11}
+                fontWeight={600}
+                fill={colorOf(v).stroke}
+                fontFamily="system-ui, sans-serif"
+              >
+                {v}
+              </text>
+            </g>
+          ))}
+        {strands.flatMap(({ v, pieces }) =>
           // (each level's halos go below all of its strokes, so a piece's
           // halo doesn't nick the end of the piece before it)
-          wirePieces(v).flatMap(({ key, d: path, z }) => [
+          pieces.flatMap(({ key, d: path, z }) => [
             <path
               id={`wire-${v}-${key}-halo`}
               dragologyZIndex={2 * z}
@@ -787,34 +1247,91 @@ const draggable: Draggable<State> = ({
               stroke="white"
               strokeWidth={HALO}
               strokeLinecap="butt"
+              opacity={strandOpacity(v)}
             />,
             <path
               id={`wire-${v}-${key}`}
               dragologyZIndex={2 * z + 1}
               d={path}
               fill="none"
-              stroke={colorOf(v).stroke}
+              stroke={strandColor(v).stroke}
               strokeWidth={STROKE}
               strokeLinecap="round"
+              opacity={strandOpacity(v)}
             />,
           ]),
         )}
+        {/* the closure's loops, each keyed by the row it leaves from (the
+            nearest, mid-turn) and colored by the strand it continues. (A
+            crossing on its way around the loops is drawn in a strand
+            piece, so the loops themselves never cross.) */}
+        {closure &&
+          strands.flatMap(({ v, endRow }) => {
+            const r = Math.round(endRow);
+            const path = loopPath(endRow);
+            return [
+              <path
+                id={`loop-${r}-halo`}
+                d={path}
+                fill="none"
+                stroke="white"
+                strokeWidth={HALO}
+                strokeLinecap="butt"
+                opacity={strandOpacity(v)}
+              />,
+              <path
+                id={`loop-${r}`}
+                dragologyZIndex={1}
+                d={path}
+                fill="none"
+                stroke={strandColor(v).stroke}
+                strokeWidth={STROKE}
+                strokeLinecap="round"
+                opacity={strandOpacity(v)}
+              />,
+            ];
+          })}
         {/* crossing handles: commute past a neighbor, or (the middle
             crossing of a braid) move a row */}
-        {columns.letters.map(({ c, j, jl, pairId }) => {
-          const id = `cross-${pairId}`;
+        {columns.letters.map(({ c, j, jl, handleId }) => {
+          // (the crossing on its way around the loops keeps the dragged
+          // handle's id, which another crossing of the word it's drawn
+          // in might have)
+          const id =
+            disp && j === disp.j
+              ? assertDefined(orbit).id
+              : `cross-${handleId}${orbit?.id === `cross-${handleId}` ? "-o" : ""}`;
           const moves = crossingMoves(n, word, jl);
-          const center = Vec2(colX(j) + CW / 2, (c.i + 0.5) * RS);
+          // In the closure, the last crossing can go on around its loops
+          // to the front, and the first one back around to the end.
+          const orbits = !palette
+            ? []
+            : [
+                jl === L - 1 && orbitSpec(word, palette, 0, id),
+                jl === 0 &&
+                  L > 1 &&
+                  orbitSpec(
+                    [...word.slice(1), c],
+                    swapColors(palette, c),
+                    1,
+                    id,
+                  ),
+              ].filter((s) => s !== false);
+          const center =
+            disp && j === disp.j
+              ? disp.center
+              : Vec2(colX(j) + CW / 2, (rowY(c.i) + rowY(c.i + 1)) / 2);
+          const stuck = moves.length === 0 && orbits.length === 0;
           return (
             <g
               id={id}
               transform={translate(center)}
               dragologyZIndex={6}
               dragologyOnDrag={() =>
-                moves.length === 0
+                stuck
                   ? d.fixed(state)
-                  : d.closest(
-                      moves.map(({ word: w, braid }) => {
+                  : d.closest([
+                      ...moves.map(({ word: w, braid }) => {
                         const moved = { ...state, word: w };
                         return braid
                           ? d.between([
@@ -823,13 +1340,14 @@ const draggable: Draggable<State> = ({
                             ])
                           : d.between([state, moved]);
                       }),
-                    )
+                      ...orbits,
+                    ])
               }
-              style={{ cursor: moves.length === 0 ? "not-allowed" : "grab" }}
+              style={{ cursor: stuck ? "not-allowed" : "grab" }}
             >
               <circle
                 r={Math.min(CW, RS) / 2 - 1}
-                fill={moves.length === 0 ? "#9ca3af" : "#2563eb"}
+                fill={stuck ? "#9ca3af" : "#2563eb"}
                 opacity={draggedId === id ? 0.35 : 0}
                 className={hitClass}
               />
@@ -838,7 +1356,7 @@ const draggable: Draggable<State> = ({
         })}
         {/* strand handles (see `strandHandles`) */}
         {_.range(1, n + 1).map((v) => (
-          <g>
+          <g dragologyKey={`strand-handles-${v}`}>
             {strandHandles(v).map((h) => {
               const id = `strand-${v}-${h.k}`;
               const at = translate(edgeX(h.k), rowY(h.row));
@@ -925,8 +1443,63 @@ const draggable: Draggable<State> = ({
             })}
           </g>
         ))}
+        {/* the stabilization handles, at each end of the bottom row, and
+            the destabilization one, along the bottom of the innermost loop
+            (there even when they can't be dragged, as where the dragged
+            one lands) */}
+        {palette &&
+          [true, false].map((atEnd) => {
+            const id = atEnd ? "curl-right" : "curl-left";
+            const stabilize = stabilizeSpec(atEnd);
+            // (on the left, clear of the first column's handles)
+            const [x0, x1] = atEnd ? [-CW * 0.7, STUB - 2] : [-STUB + 2, 4];
+            return (
+              <g
+                id={id}
+                transform={translate(atEnd ? wireX1 : wireX0, rowY(lastRow))}
+                dragologyZIndex={6}
+                dragologyOnDrag={stabilize ? () => stabilize : undefined}
+                style={{ cursor: stabilize ? "ns-resize" : undefined }}
+              >
+                <rect
+                  transform={translate(x0, -RS * 0.3)}
+                  width={x1 - x0}
+                  height={RS * 0.6}
+                  rx={4}
+                  fill="#dc2626"
+                  opacity={draggedId === id ? 0.35 : 0}
+                  className={stabilize ? hitClass : undefined}
+                />
+              </g>
+            );
+          })}
+        {palette &&
+          (() => {
+            const destabilize = destabilizeSpec();
+            const x0 = wireX0 - STUB + RB;
+            const x1 = wireX1 + STUB - RB;
+            return (
+              <g
+                id="inner-loop"
+                transform={translate((x0 + x1) / 2, yB0)}
+                dragologyZIndex={6}
+                dragologyOnDrag={destabilize ? () => destabilize : undefined}
+                style={{ cursor: destabilize ? "ns-resize" : undefined }}
+              >
+                <rect
+                  transform={translate(-(x1 - x0) / 2, -LS * 0.4)}
+                  width={x1 - x0}
+                  height={LS * 0.8}
+                  rx={4}
+                  fill="#dc2626"
+                  opacity={draggedId === "inner-loop" ? 0.35 : 0}
+                  className={destabilize ? hitClass : undefined}
+                />
+              </g>
+            );
+          })()}
       </g>
-      {/* ## Word, under the crossings */}
+      {/* ## Word, by the crossings */}
       <g transform={translate(diagramOrigin.add(Vec2(0, wordY)))}>
         <text
           transform={translate(-30, 0)}
@@ -953,7 +1526,31 @@ const draggable: Draggable<State> = ({
           </text>
         )}
         {columns.letters.map(({ c, j, pairId }) =>
-          letterGlyph(`word-letter-${pairId}`, c, colX(j) + CW / 2, 1),
+          disp && j === disp.j
+            ? // (fading out as the crossing leaves the diagram for the
+              // loops)
+              letterGlyph(
+                `word-letter-${pairId}`,
+                c,
+                disp.center.x,
+                _.clamp(
+                  1 -
+                    Math.max(
+                      wireX0 - disp.center.x,
+                      disp.center.x - wireX1,
+                      Math.abs(disp.center.y - (rowY(c.i) + rowY(c.i + 1)) / 2),
+                    ) /
+                      16,
+                  0,
+                  1,
+                ),
+              )
+            : letterGlyph(
+                `word-letter-${pairId}`,
+                c,
+                colX(j) + CW / 2,
+                c.flat ? 0 : 1,
+              ),
         )}
         {/* a crossing in progress fades in as it turns */}
         {columns.pending &&
@@ -967,8 +1564,8 @@ const draggable: Draggable<State> = ({
       {/* ## Cross-section */}
       <g transform={translate(diagramOrigin)}>
         {(() => {
-          const top = -0.75;
-          const bottom = n - 0.25;
+          const top = rowY(0) - 0.75 * RS;
+          const bottom = rowY(lastRow) + 0.75 * RS;
           const corners = [
             project(top, DEPTH).pos,
             project(top, -DEPTH).pos,
@@ -1002,8 +1599,10 @@ const draggable: Draggable<State> = ({
               </g>
               {_.range(n).map((r) => (
                 <line
-                  {...project(r, DEPTH).pos.xy1()}
-                  {...project(r, -DEPTH).pos.xy2()}
+                  dragologyKey={`grid-${r}`}
+                  {...project(rowY(r), DEPTH).pos.xy1()}
+                  {...project(rowY(r), -DEPTH).pos.xy2()}
+                  opacity={strandOpacity(r + 1)}
                   stroke="#e2e8f0"
                   strokeWidth={1}
                 />
@@ -1023,11 +1622,12 @@ const draggable: Draggable<State> = ({
         {_.range(1, n + 1).map((v) => {
           const id = `pt-${v}`;
           const { row, depth } = shownConfig.get(v)!;
-          const { pos, scale } = project(row, depth);
+          const { pos, scale } = project(rowY(row), depth);
           return (
             <g
               id={id}
               transform={translate(pos)}
+              opacity={strandOpacity(v)}
               dragologyZIndex={draggedId === id ? 8 : 7}
               dragologyOnDrag={() => {
                 const r = perm.indexOf(v);
@@ -1056,13 +1656,13 @@ const draggable: Draggable<State> = ({
             >
               <circle
                 r={11 * scale}
-                fill={colorOf(v).fill}
+                fill={strandColor(v).fill}
                 opacity={draggedId === id ? 0.8 : 0}
                 className={hitClass}
               />
               <circle
                 r={6.5 * scale}
-                fill={colorOf(v).stroke}
+                fill={strandColor(v).stroke}
                 stroke="white"
                 strokeWidth={1.5}
               />
@@ -1070,7 +1670,7 @@ const draggable: Draggable<State> = ({
           );
         })}
         {/* the moment shown, when hovering */}
-        {rawState.hoverX !== undefined && (
+        {rawState.hoverX !== undefined && rawState.showMoment && (
           <g
             id="hover-cursor"
             dragologyZIndex={6}
@@ -1092,7 +1692,7 @@ const draggable: Draggable<State> = ({
                   rowY(shownConfig.get(v)!.row),
                 )}
                 r={4}
-                fill={colorOf(v).stroke}
+                fill={strandColor(v).stroke}
                 stroke="white"
                 strokeWidth={1.5}
               />
@@ -1124,6 +1724,7 @@ const draggable: Draggable<State> = ({
  * right away. With two strands there's only σ₁: a full twist next to a
  * pair that cancels. */
 const INITIAL_WORDS: Record<number, [number, Sign][]> = {
+  1: [],
   2: [
     [0, 1],
     [0, 1],
@@ -1163,10 +1764,75 @@ const INITIAL_WORDS: Record<number, [number, Sign][]> = {
 const initialWord = (n: number): Letter[] =>
   INITIAL_WORDS[n].map(([i, sign]) => ({ i, sign }));
 
+/** Closed braids to start from: links drawn with as few strands as they
+ * can be, and drawn with more, to be reduced by Markov moves. Letters
+ * are generator numbers, negative for inverses. */
+const PRESETS: { name: string; reduced: boolean; n: number; word: number[] }[] =
+  [
+    { name: "unknot", reduced: true, n: 1, word: [] },
+    { name: "Hopf link", reduced: true, n: 2, word: [1, 1] },
+    { name: "trefoil", reduced: true, n: 2, word: [1, 1, 1] },
+    { name: "cinquefoil", reduced: true, n: 2, word: [1, 1, 1, 1, 1] },
+    { name: "figure-eight", reduced: true, n: 3, word: [1, -2, 1, -2] },
+    {
+      name: "Borromean rings",
+      reduced: true,
+      n: 3,
+      word: [1, -2, 1, -2, 1, -2],
+    },
+    {
+      name: "(3, 4) torus knot",
+      reduced: true,
+      n: 3,
+      word: [1, 2, 1, 2, 1, 2, 1, 2],
+    },
+    // stabilized: destabilize three times
+    { name: "unknot", reduced: false, n: 4, word: [1, -2, 3] },
+    // σ₁ (σ₁² σ₂) σ₁⁻¹: conjugate, cancel, destabilize
+    { name: "Hopf link", reduced: false, n: 3, word: [1, 1, 1, 2, -1] },
+    // (σ₁σ₂)²: a braid move, conjugate, destabilize
+    { name: "trefoil", reduced: false, n: 3, word: [1, 2, 1, 2] },
+    // σ₂ ((σ₁σ₂⁻¹)² σ₃) σ₂⁻¹
+    {
+      name: "figure-eight",
+      reduced: false,
+      n: 4,
+      word: [2, 1, -2, 1, -2, 3, -2],
+    },
+  ];
+const presetWord = (word: number[]): Letter[] =>
+  word.map((g) => ({ i: Math.abs(g) - 1, sign: g > 0 ? 1 : -1 }));
+
 export default demo(
   () => {
     const [n, setN] = useState(4);
+    const [closure, setClosure] = useState(false);
+    const [preset, setPreset] = useState<number | null>(null);
     const [resetCount, setResetCount] = useState(0);
+    const [showMoment, setShowMoment] = useState(false);
+    const stateOverride = useMemo(() => ({ showMoment }), [showMoment]);
+    const presetButtons = (reduced: boolean) =>
+      PRESETS.map((p, k) =>
+        p.reduced !== reduced ? null : (
+          <button
+            key={k}
+            className={`text-xs border rounded px-2 py-1 ${
+              preset === k
+                ? "border-blue-400 bg-blue-50"
+                : "border-gray-300 bg-white hover:bg-gray-100"
+            }`}
+            onClick={() => {
+              setN(p.n);
+              setClosure(true);
+              setPreset(k);
+              setResetCount((c) => c + 1);
+            }}
+          >
+            {p.name}
+            {!reduced && ` (${p.n} strands)`}
+          </button>
+        ),
+      );
     return (
       <div>
         <DemoNotes>
@@ -1185,12 +1851,59 @@ export default demo(
           around each other. Add crossings at the end by turning a point around
           its neighbor, in front or behind.
         </DemoNotes>
+        <DemoNotes>
+          Close the braid up to see it as a link. Every drag on the diagram is
+          then a Markov move or a relation, so the link never changes; only its
+          braid does. Strands are colored by the component of the link they
+          belong to. Drag the last crossing on around its loops and in at the
+          front to conjugate (or the first one back around). Pull the bottom
+          strand down at either end of the braid to stabilize, adding a strand,
+          a loop, and a crossing at that end of the word, where the strand you
+          pull passes in front. When the bottom strand crosses only once, at
+          either end, pull the innermost loop back in to destabilize.
+        </DemoNotes>
+        {/* (each row's buttons wrap under each other, beside their label,
+            or under it on a narrow screen) */}
+        <div className="flex flex-col gap-3 bg-gray-50 rounded p-3 mb-3 text-xs">
+          {(
+            [
+              ["fewest strands:", true],
+              ["reducible:", false],
+            ] as const
+          ).map(([label, reduced]) => (
+            <div
+              key={label}
+              className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-2"
+            >
+              <span className="text-gray-600 sm:w-28 shrink-0">{label}</span>
+              <div className="flex flex-wrap gap-2">
+                {presetButtons(reduced)}
+              </div>
+            </div>
+          ))}
+        </div>
         <div className="flex flex-wrap items-start gap-6 bg-gray-50 rounded p-3 mb-3 text-xs">
           <ConfigSelect
             label="n"
             value={n}
-            onChange={setN}
-            options={[2, 3, 4, 5, 6]}
+            onChange={(v) => {
+              setN(v);
+              setPreset(null);
+            }}
+            options={[1, 2, 3, 4, 5, 6]}
+          />
+          <ConfigCheckbox
+            label="close the braid"
+            value={closure}
+            onChange={(v) => {
+              setClosure(v);
+              setPreset(null);
+            }}
+          />
+          <ConfigCheckbox
+            label="show the slice"
+            value={showMoment}
+            onChange={setShowMoment}
           />
           <button
             className="text-xs border border-gray-300 rounded px-2 py-1 bg-white hover:bg-gray-100"
@@ -1200,25 +1913,48 @@ export default demo(
           </button>
         </div>
         <DemoDraggable
-          key={`${n}-${resetCount}`}
+          key={`${n}-${closure}-${resetCount}`}
           draggable={draggable}
           initialState={{
             n,
-            // start somewhere interesting; reset goes to the trivial braid
-            word: resetCount === 0 ? initialWord(n) : [],
+            // start somewhere interesting; reset goes back to the preset, or
+            // else to the trivial braid
+            word:
+              preset !== null
+                ? presetWord(PRESETS[preset].word)
+                : resetCount === 0
+                  ? initialWord(n)
+                  : [],
+            ...(closure && { closure }),
           }}
           width={WIDTH}
-          height={heightFor(n)}
+          height={closure ? CLOSURE_HEIGHT : heightFor(n)}
+          stateOverride={stateOverride}
         />
       </div>
     );
   },
   {
-    fuzz: [2, 3, 4].map((n) => ({
-      name: `n${n}`,
-      draggable,
-      initialState: { n, word: initialWord(n) },
-    })),
+    fuzz: [2, 3, 4]
+      .flatMap((n) => [
+        { name: `n${n}`, draggable, initialState: { n, word: initialWord(n) } },
+        {
+          name: `n${n}-closure`,
+          draggable,
+          initialState: { n, word: initialWord(n), closure: true as const },
+        },
+      ])
+      .concat(
+        [0, 7, 10].map((k) => ({
+          name: `preset-${k}`,
+          draggable,
+          initialState: {
+            n: PRESETS[k].n,
+            word: presetWord(PRESETS[k].word),
+            closure: true as const,
+          },
+        })),
+      ),
     tags: [
       "d.between",
       "d.closest",
