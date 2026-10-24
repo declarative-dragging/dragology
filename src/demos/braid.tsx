@@ -128,10 +128,6 @@ type State = {
   /** Also mark that moment on the diagram, with a line and the points
    * where it cuts the strands. (A display option, set from outside.) */
   showMoment?: boolean;
-  /** The last letter is a crossing still being turned in the
-   * cross-section, past halfway: the drag that made it can still turn
-   * it back. Only means anything mid-drag; see `turnSpec`. */
-  open?: true;
   /** Draw the closure, with the Markov moves. */
   closure?: true;
   /** The color of each strand's component, for the closure; see
@@ -501,6 +497,9 @@ const PANEL_W = 100; // the cross-section's width
 // about 0.8 times as wide as it is tall. (At the depth-0 line, a unit of
 // `u` spans 0.96 of the width; see `project`.)
 const DEPTH = (0.96 * PANEL_W) / (2 * 0.8 * RS);
+/** A turn in the cross-section snaps to its end, and chains on, from
+ * this close (in px). */
+const SNAP_PX = 4;
 const heightFor = (n: number) => 52 + n * RS + 56;
 
 // The closure's loops: each row's runs STUB to the right of the diagram,
@@ -1016,73 +1015,39 @@ const draggable: Draggable<State> = ({
     };
   };
 
-  // How far a turning point swings toward the back and the front, in
-  // the pointer's coordinates. Turn drags hold the pointer's x within
-  // this, so pulling far to the side doesn't drive the turn.
-  const arcX0 = diagramOrigin.x + project(0, -0.5).pos.x;
-  const arcX1 = diagramOrigin.x + project(0, 0.5).pos.x;
+  // Turn drags hold the pointer's x within the snap radius of the line
+  // the points rest on: enough to say which way around, and close
+  // enough that at the end of a turn (where the arc comes in sideways,
+  // so the point lags a pointer held out to the side) the point still
+  // snaps to the end and chains on.
+  const restX = diagramOrigin.x + project(0, 0).pos.x;
+  const arcX0 = restX - SNAP_PX;
+  const arcX1 = restX + SNAP_PX;
 
   // Turning a point in the cross-section writes a crossing at the end of
-  // the word. Past halfway the crossing is written, and the drag chains
-  // to that state, marked `open`: from there it can turn the crossing
-  // back (unwinding it, the only way a panel drag removes a letter), or
-  // turn on around a neighbor from the new rows. Turning on settles the
-  // open crossing, so turning back after that writes a new one. The
-  // chains switch between specs that draw the moment of switching the
-  // same, so nothing jumps.
-  /** Vary the progress of crossing `l` written after `base`, starting
-   * at `p`; dropped short of halfway, it's `settled`. */
-  const turnVary = (base: Letter[], l: Letter, p: number, settled: State) => {
-    const k = base.length;
-    const turning: State = {
-      ...state,
-      word: [...base, { ...l, gap: "pending", p }],
-    };
-    const done: State = { ...state, word: [...base, l], open: true };
-    return d
-      .vary(turning, [param("word", k, "p")], {
-        constraint: (s) => inOrder([0, assertDefined(s.word[k].p), 1]),
-      })
-      .onDrop((s) => (assertDefined(s.word[k].p) > 0.5 ? done : settled))
-      .withChaining({ transition: false });
-  };
-
-  /** The open crossing that dragging point `v` (element `id`) can turn
-   * back, if any. Only in a chained drag: a state dropped with the flag
-   * still on is settled as far as the next drag goes. */
-  const openFor = (v: number, id: string) => {
-    if (!rawState.open || draggedId !== id) return undefined;
-    const { a, b } = assertDefined(xs.at(-1));
-    return v === a || v === b ? word.at(-1) : undefined;
-  };
-
-  /** Turn the open crossing `l` back. The optimizer starts at halfway,
-   * where the drag chained into the open state, so it starts where the
-   * point is. */
-  const unwindSpec = (l: Letter) => {
-    const prev = word.slice(0, -1);
-    return turnVary(prev, l, 0.5, { ...state, word: prev });
-  };
-
-  /** Turn strand `v` half a turn around its neighbor in row `r2`, passing
-   * in front of it or behind. (Turning back the way the last crossing
-   * went writes its inverse, except while that crossing is `open`: then
-   * it would trace the same arc as unwinding it, and the two would trade
-   * places at every frame, each trade chaining.) */
-  const turnSpec = (
-    v: number,
-    r2: number,
-    front: boolean,
-    open: Letter | undefined,
-  ) => {
+  // the word. The turn's progress is the pending column's `p`: dropping
+  // past halfway commits it, and reaching the end snaps to it and
+  // chains into the written word, so one drag can keep turning.
+  // (Turning back the way the last crossing went writes its inverse.)
+  const turnSpec = (v: number, r2: number, front: boolean) => {
     if (!canAppend(1)) return null;
     const row = perm.indexOf(v);
     const l: Letter = {
       i: Math.min(row, r2),
       sign: row < r2 === front ? 1 : -1,
     };
-    if (open && l.i === open.i && l.sign !== open.sign) return null;
-    return turnVary(word, l, 0, state);
+    const k = L;
+    const turning: State = {
+      ...state,
+      word: [...word, { ...l, gap: "pending", p: 0 }],
+    };
+    const done: State = { ...state, word: [...word, l] };
+    return d
+      .vary(turning, [param("word", k, "p")], {
+        constraint: (s) => inOrder([0, assertDefined(s.word[k].p), 1]),
+      })
+      .onDrop((s) => (assertDefined(s.word[k].p) > 0.5 ? done : state))
+      .withSnapRadius(SNAP_PX, { chain: true });
   };
 
   // ### Markov moves
@@ -1189,6 +1154,7 @@ const draggable: Draggable<State> = ({
     <g>
       <style>{`
         .braid-hit:hover { opacity: 0.35 !important; }
+        .braid-pt:hover .braid-pt-halo { opacity: 0.35 !important; }
       `}</style>
       {/* ## Diagram */}
       <g transform={translate(diagramOrigin)}>
@@ -1631,34 +1597,28 @@ const draggable: Draggable<State> = ({
               dragologyZIndex={draggedId === id ? 8 : 7}
               dragologyOnDrag={() => {
                 const r = perm.indexOf(v);
-                const open = openFor(v, id);
                 return d
-                  .closest([
-                    // Reaching the end of the turn settles it. (This wins
-                    // ties with the other branches there, which all look
-                    // the same.)
-                    open &&
-                      d
-                        .fixed(state)
-                        .changeGap((g) => g - 1)
-                        .withChaining({ transition: false }),
-                    open && unwindSpec(open),
-                    ...[true, false].flatMap((front) => [
-                      r > 0 && turnSpec(v, r - 1, front, open),
-                      r < n - 1 && turnSpec(v, r + 1, front, open),
+                  .closest(
+                    [true, false].flatMap((front) => [
+                      r > 0 && turnSpec(v, r - 1, front),
+                      r < n - 1 && turnSpec(v, r + 1, front),
                     ]),
-                  ])
+                  )
                   .changeFrame(({ pointer }) => ({
                     pointer: Vec2(clamp(pointer.x, arcX0, arcX1), pointer.y),
                   }));
               }}
               style={{ cursor: full ? "not-allowed" : "grab" }}
+              // (the hover highlight is the halo, but hovering the dot
+              // on top of it should count too, so the group takes the
+              // hover)
+              className={draggedId === null ? "braid-pt" : undefined}
             >
               <circle
                 r={11 * scale}
                 fill={strandColor(v).fill}
                 opacity={draggedId === id ? 0.8 : 0}
-                className={hitClass}
+                className="braid-pt-halo"
               />
               <circle
                 r={6.5 * scale}
@@ -1960,10 +1920,9 @@ export default demo(
       "d.closest",
       "d.fixed",
       "d.vary",
-      "spec.withChaining [transition]",
       "spec.onDrop",
+      "spec.withSnapRadius [chain]",
       "spec.changeFrame",
-      "spec.changeGap",
       "math",
     ],
   },
