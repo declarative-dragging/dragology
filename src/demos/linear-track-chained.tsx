@@ -1,7 +1,7 @@
-import { Vec2 } from "#dragology-built";
 import { demo } from "../demo";
 import { DemoDraggable } from "../demo/ui";
 import { Draggable } from "../draggable";
+import { Vec2 } from "../math/vec2";
 import { path, translate } from "../svgx/helpers";
 
 type State = {
