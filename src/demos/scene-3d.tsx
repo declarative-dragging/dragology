@@ -8,7 +8,7 @@ import {
 } from "../demo/ui";
 import { Draggable } from "../draggable";
 import { inOrder, param } from "../DragSpec";
-import { translate } from "../svgx/helpers";
+import { path, translate } from "../svgx/helpers";
 
 // A simple 3D scene: draggable colored boxes on a ground grid.
 // Use the sliders to orbit the camera; drag boxes to move them on the ground.
@@ -58,10 +58,6 @@ function makeProjection(az: number, el: number, fov: number, camDist: number) {
     const f = FOCAL / (camDist - depth);
     return { x: sx * f + CX, y: sy * f + CY, depth };
   };
-}
-
-function pStr(pts: Pt[]): string {
-  return pts.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ");
 }
 
 function pRel(pts: Pt[], ox: number, oy: number): string {
@@ -116,7 +112,10 @@ function makeDraggable(
       <g>
         <rect width={W} height={H} fill="#1a1a2e" />
 
-        <polygon points={pStr(groundCorners)} fill="rgba(255,255,255,0.03)" />
+        <polygon
+          points={path(...groundCorners)}
+          fill="rgba(255,255,255,0.03)"
+        />
 
         {gridRange.map((i) => (
           <g>
@@ -140,7 +139,7 @@ function makeDraggable(
         ))}
 
         <polygon
-          points={pStr(groundCorners)}
+          points={path(...groundCorners)}
           fill="none"
           stroke="rgba(255,255,255,0.28)"
           strokeWidth={1.2}

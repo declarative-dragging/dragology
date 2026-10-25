@@ -4,7 +4,7 @@ import { DemoDraggable } from "../demo/ui";
 import { Draggable } from "../draggable";
 import { lessThan, param } from "../DragSpec";
 import { Vec2 } from "../math/vec2";
-import { translate } from "../svgx/helpers";
+import { path, translate } from "../svgx/helpers";
 
 type State = {
   x: number;
@@ -34,14 +34,12 @@ function polygonConstraint(s: State) {
   });
 }
 
-const pointsStr = vertices.map((v) => v.str()).join(" ");
-
 const draggable: Draggable<State> = ({ state, d }) => {
   return (
     <g>
       {/* boundary polygon */}
       <polygon
-        points={pointsStr}
+        points={path(...vertices)}
         fill="none"
         stroke="#ccc"
         strokeWidth={2}

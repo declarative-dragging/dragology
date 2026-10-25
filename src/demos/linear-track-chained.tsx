@@ -1,7 +1,8 @@
+import { Vec2 } from "#dragology-built";
 import { demo } from "../demo";
 import { DemoDraggable } from "../demo/ui";
 import { Draggable } from "../draggable";
-import { translate } from "../svgx/helpers";
+import { path, translate } from "../svgx/helpers";
 
 type State = {
   value: number;
@@ -14,9 +15,11 @@ const initialState: State = { value: 0 };
 const draggable: Draggable<State> = ({ state, d }) => (
   <g>
     <polyline
-      points={[0, 1, 2, 3]
-        .map((v) => `${v * 100 + SIZE / 2},${20 * (-1) ** v + 20 + SIZE / 2}`)
-        .join(" ")}
+      points={path(
+        ...[0, 1, 2, 3].map((v) =>
+          Vec2(v * 100 + SIZE / 2, 20 * (-1) ** v + 20 + SIZE / 2),
+        ),
+      )}
       fill="none"
       stroke="#cbd5e1"
       strokeWidth={6}

@@ -11,8 +11,9 @@ import {
 } from "../demo/ui";
 import { Draggable } from "../draggable";
 import { DragSpecBuilder } from "../DragSpec";
+import { Vec2, Vec2able } from "../math/vec2";
 import { Svgx } from "../svgx";
-import { draggableLine, scale, translate } from "../svgx/helpers";
+import { draggableLine, path, scale, translate } from "../svgx/helpers";
 
 // # Catalan objects
 //
@@ -352,7 +353,7 @@ const nodeStroke = (id: string) =>
 // vertices and of edges it isn't on – a layered layout can't, because
 // the lattice isn't graded and some edges skip levels.
 
-type LatticeVertex = { key: string; tree: Node; x: number; y: number };
+type LatticeVertex = { key: string; tree: Node; pos: Vec2 };
 type Lattice = {
   vertices: LatticeVertex[];
   byKey: Map<string, LatticeVertex>;
@@ -487,32 +488,30 @@ function getLattice(
   };
   // Don't stretch small lattices across the whole width.
   const drawnWidth = Math.min(width, 1.5 * height);
-  const layout = (wx: number[], wy: number[]) => ({
-    xs: project(wx, drawnWidth).map((x) => x + (width - drawnWidth) / 2),
-    ys: project(wy, height).map((y) => height - y),
-  });
+  const layout = (wx: number[], wy: number[]) => {
+    const xs = project(wx, drawnWidth);
+    const ys = project(wy, height);
+    return xs.map((x, i) => Vec2(x + (width - drawnWidth) / 2, height - ys[i]));
+  };
+
+  /** Distance from point `p` to the segment from `a` to `b`. */
+  const segDist = (p: Vec2, a: Vec2, b: Vec2) => {
+    const ab = b.sub(a);
+    const t = _.clamp(p.sub(a).dot(ab) / ab.len2(), 0, 1);
+    return a.add(ab.mul(t)).dist(p);
+  };
 
   // Room around the tightest vertex: its distance to the nearest edge
   // it isn't on, or half its distance to the nearest other vertex.
-  const clearance = ({ xs, ys }: { xs: number[]; ys: number[] }) => {
+  const clearance = (pts: Vec2[]) => {
     let min = Infinity;
     for (let i = 0; i < trees.length; i++) {
       for (let j = i + 1; j < trees.length; j++) {
-        min = Math.min(min, Math.hypot(xs[i] - xs[j], ys[i] - ys[j]) / 2);
+        min = Math.min(min, pts[i].dist(pts[j]) / 2);
       }
       for (const [a, b] of ends) {
         if (a === i || b === i) continue;
-        const dx = xs[b] - xs[a];
-        const dy = ys[b] - ys[a];
-        const t = _.clamp(
-          ((xs[i] - xs[a]) * dx + (ys[i] - ys[a]) * dy) / (dx * dx + dy * dy),
-          0,
-          1,
-        );
-        min = Math.min(
-          min,
-          Math.hypot(xs[a] + t * dx - xs[i], ys[a] + t * dy - ys[i]),
-        );
+        min = Math.min(min, segDist(pts[i], pts[a], pts[b]));
       }
     }
     return min;
@@ -520,8 +519,8 @@ function getLattice(
 
   // Edges run from lower to upper vertex. Score how steep the flattest
   // one is alongside clearance, so none lies nearly flat.
-  const minRise = ({ ys }: { ys: number[] }) =>
-    Math.min(...ends.map(([a, b]) => ys[a] - ys[b]));
+  const minRise = (pts: Vec2[]) =>
+    Math.min(...ends.map(([a, b]) => pts[a].y - pts[b].y));
 
   // Mirroring a tree reverses its Loday coordinates and turns the
   // lattice upside down. A palindromic wx, and a wy whose steps are
@@ -566,7 +565,7 @@ function getLattice(
     );
   }
   const { wx, wy } = weights(bestX, bestY);
-  const { xs, ys } = layout(wx, wy);
+  const pts = layout(wx, wy);
 
   // A flat projection can't always leave enough room (n = 5 is a 4D
   // polytope), so then nudge vertices off whatever they crowd, keeping
@@ -579,46 +578,39 @@ function getLattice(
   const incident = trees.map((_t, i) =>
     ends.filter(([a, b]) => a === i || b === i),
   );
-  const segDist = (i: number, a: number, b: number) => {
-    const dx = xs[b] - xs[a];
-    const dy = ys[b] - ys[a];
-    const t = _.clamp(
-      ((xs[i] - xs[a]) * dx + (ys[i] - ys[a]) * dy) / (dx * dx + dy * dy),
-      0,
-      1,
-    );
-    return Math.hypot(xs[a] + t * dx - xs[i], ys[a] + t * dy - ys[i]);
-  };
   const hinge = (need: number, d: number) => Math.max(0, need - d) ** 2;
   // the penalty terms that involve vertex v
   const crowding = (v: number) => {
     let p = 0;
     for (let j = 0; j < trees.length; j++) {
-      if (j !== v) p += hinge(needVV, Math.hypot(xs[v] - xs[j], ys[v] - ys[j]));
+      if (j !== v) p += hinge(needVV, pts[v].dist(pts[j]));
     }
     for (const [a, b] of ends) {
-      if (a !== v && b !== v) p += hinge(needVE, segDist(v, a, b));
+      if (a !== v && b !== v)
+        p += hinge(needVE, segDist(pts[v], pts[a], pts[b]));
     }
     for (const [a, b] of incident[v]) {
       for (let j = 0; j < trees.length; j++) {
-        if (j !== a && j !== b) p += hinge(needVE, segDist(j, a, b));
+        if (j !== a && j !== b)
+          p += hinge(needVE, segDist(pts[j], pts[a], pts[b]));
       }
     }
     return p;
   };
-  const riseFloor = minRise({ ys });
+  const riseFloor = minRise(pts);
   const pointsUp = (v: number) =>
-    incident[v].every(([a, b]) => ys[a] - ys[b] >= riseFloor);
+    incident[v].every(([a, b]) => pts[a].y - pts[b].y >= riseFloor);
   const dirs = [
-    [1, 0],
-    [-1, 0],
-    [0, 1],
-    [0, -1],
-    [1, 1],
-    [1, -1],
-    [-1, 1],
-    [-1, -1],
+    Vec2(1, 0),
+    Vec2(-1, 0),
+    Vec2(0, 1),
+    Vec2(0, -1),
+    Vec2(1, 1),
+    Vec2(1, -1),
+    Vec2(-1, 1),
+    Vec2(-1, -1),
   ];
+  const box = Vec2(width, height);
   for (let step = 8; step >= 0.5; step /= 2) {
     for (let pass = 0; pass < 40; pass++) {
       let moved = false;
@@ -628,19 +620,18 @@ function getLattice(
         const pairCrowding = () => crowding(v) + (m === v ? 0 : crowding(m));
         let current = pairCrowding();
         if (current === 0) continue;
-        for (const [dx, dy] of dirs) {
+        for (const dir of dirs) {
           // a self-mirror vertex stays on the middle line
-          if (m === v && dy !== 0) continue;
-          const saved = [xs[v], ys[v], xs[m], ys[m]];
-          xs[v] = xs[m] = _.clamp(saved[0] + dx * step, 0, width);
-          ys[v] = _.clamp(saved[1] + dy * step, 0, height);
-          if (m !== v) ys[m] = height - ys[v];
+          if (m === v && dir.y !== 0) continue;
+          const saved = [pts[v], pts[m]];
+          pts[v] = saved[0].add(dir.mul(step)).clamp(Vec2(0), box);
+          if (m !== v) pts[m] = Vec2(pts[v].x, height - pts[v].y);
           const next = pointsUp(v) && pointsUp(m) ? pairCrowding() : Infinity;
           if (next < current) {
             current = next;
             moved = true;
           } else {
-            [xs[v], ys[v], xs[m], ys[m]] = saved;
+            [pts[v], pts[m]] = saved;
           }
         }
       }
@@ -651,8 +642,7 @@ function getLattice(
   const vertices = trees.map((tree, i) => ({
     key: keys[i],
     tree,
-    x: xs[i],
-    y: ys[i],
+    pos: pts[i],
   }));
   const lattice: Lattice = {
     vertices,
@@ -668,31 +658,30 @@ function getLattice(
 
 const W = 700;
 
-const POLY_C = { x: 125, y: 150 };
+const POLY_C = Vec2(125, 150);
 const POLY_R = 95;
 
-const TREE_ORIGIN = { x: 270, y: 60 };
+const TREE_ORIGIN = Vec2(270, 60);
 const TREE_W = 200;
 const TREE_DY = 30;
 
-const DYCK_ORIGIN = { x: 510, y: 180 };
+const DYCK_ORIGIN = Vec2(510, 180);
 const DYCK_W = 170;
 
-const PAIR_ORIGIN = { x: 520, y: 305 };
+const PAIR_ORIGIN = Vec2(520, 305);
 const PAIR_W = 170;
 
-const PAREN_ORIGIN = { x: 265, y: 270 };
+const PAREN_ORIGIN = Vec2(265, 270);
 const PAREN_ADV = 18;
 
-const LAT_ORIGIN = { x: 40, y: 350 };
+const LAT_ORIGIN = Vec2(40, 350);
 const LAT_W = 560;
 const LEVEL_DY = 46;
 const latticeHeight = (n: number) => ((n * (n - 1)) / 2) * LEVEL_DY;
 const canvasHeight = (n: number) => LAT_ORIGIN.y + latticeHeight(n) + 30;
 
-function polygonVertex(k: number, m: number, r = POLY_R) {
-  const theta = ((90 + 180 / m + (k * 360) / m) * Math.PI) / 180;
-  return { x: r * Math.cos(theta), y: r * Math.sin(theta) };
+function polygonVertex(k: number, m: number, r = POLY_R): Vec2 {
+  return Vec2.polarDeg(r, 90 + 180 / m + (k * 360) / m);
 }
 
 function polygonView(
@@ -703,10 +692,9 @@ function polygonView(
 ): Svgx {
   const m = n + 2;
   const V = _.range(m).map((k) => polygonVertex(k, m));
-  const pt = (k: number) => `${V[k].x},${V[k].y}`;
   const nodes = [...infos.values()];
   return (
-    <g transform={translate(POLY_C.x, POLY_C.y)}>
+    <g transform={translate(POLY_C)}>
       {/* triangles */}
       {nodes.map(({ node, lo, split, hi }) => {
         // corners: the active edge's two ends (A end first), then apex
@@ -727,7 +715,7 @@ function polygonView(
         return (
           <polygon
             id={`tri-${node.id}`}
-            points={corners.map(pt).join(" ")}
+            points={path(...corners.map((k) => V[k]))}
             fill={nodeFill(node.id)}
             stroke="none"
           />
@@ -735,30 +723,25 @@ function polygonView(
       })}
       {/* outline */}
       <polygon
-        points={V.map((_v, k) => pt(k)).join(" ")}
+        points={path(...V)}
         fill="none"
         stroke="#334155"
         strokeWidth={1.5}
       />
       {/* root edge */}
       <line
-        x1={V[0].x}
-        y1={V[0].y}
-        x2={V[m - 1].x}
-        y2={V[m - 1].y}
+        {...V[0].xy1()}
+        {...V[m - 1].xy2()}
         stroke="#334155"
         strokeWidth={4}
       />
       {/* side labels */}
       {_.range(n + 1).map((i) => {
-        const a = V[i];
-        const b = V[i + 1];
-        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        const len = Math.hypot(mid.x, mid.y);
-        const out = { x: (mid.x / len) * 16, y: (mid.y / len) * 16 };
+        // the side's midpoint, pushed 16px outward from the center
+        const mid = V[i].mid(V[i + 1]);
         return (
           <text
-            transform={translate(mid.x + out.x, mid.y + out.y)}
+            transform={translate(mid.add(mid.withLen(16)))}
             textAnchor="middle"
             dominantBaseline="middle"
             fontSize={13}
@@ -788,10 +771,8 @@ function polygonView(
           return (
             <g id={`diag-${node.edgeId}`}>
               <line
-                x1={pa.x}
-                y1={pa.y}
-                x2={pb.x}
-                y2={pb.y}
+                {...pa.xy1()}
+                {...pb.xy2()}
                 stroke={EDGE_COLOR}
                 strokeWidth={3.5}
                 strokeLinecap="round"
@@ -820,10 +801,8 @@ function treeView(
 ): Svgx {
   const ux = TREE_W / (2 * n);
   const leafDepth = n;
-  const posOf = (inorder: number, depth: number) => ({
-    x: inorder * ux,
-    y: depth * TREE_DY,
-  });
+  const posOf = (inorder: number, depth: number) =>
+    Vec2(inorder * ux, depth * TREE_DY);
   const nodePos = (id: string) => {
     const info = infos.get(id)!;
     return posOf(info.inorder, info.depth);
@@ -831,7 +810,7 @@ function treeView(
   const nodes = [...infos.values()];
   const R = 9;
   return (
-    <g transform={translate(TREE_ORIGIN.x, TREE_ORIGIN.y)}>
+    <g transform={translate(TREE_ORIGIN)}>
       {/* edges to internal children */}
       {nodes
         .filter(({ parent }) => parent !== null)
@@ -844,10 +823,8 @@ function treeView(
           return (
             <line
               id={`edge-${node.edgeId}`}
-              x1={a.x}
-              y1={a.y}
-              x2={b.x}
-              y2={b.y}
+              {...a.xy1()}
+              {...b.xy2()}
               stroke={EDGE_COLOR}
               strokeWidth={3}
               strokeLinecap="round"
@@ -869,10 +846,8 @@ function treeView(
             return (
               <line
                 id={`leafedge-${leafIndex}`}
-                x1={a.x}
-                y1={a.y}
-                x2={b.x}
-                y2={b.y}
+                {...a.xy1()}
+                {...b.xy2()}
                 stroke="#94a3b8"
                 strokeWidth={1.5}
               />
@@ -956,10 +931,9 @@ function dyckView(
 ): Svgx {
   const u = DYCK_W / (2 * n);
   const steps = dyckSteps(state.root);
-  const pts: { x: number; y: number }[] = [{ x: 0, y: 0 }];
+  const pts: Vec2[] = [Vec2(0)];
   steps.forEach((s, i) => {
-    const p = pts[i];
-    pts.push({ x: p.x + u, y: p.y + (s.dir === "U" ? -u : u) });
+    pts.push(pts[i].add(Vec2(u, s.dir === "U" ? -u : u)));
   });
   const segsById = new Map<string, { a: number; b: number }[]>();
   steps.forEach((s, i) => {
@@ -971,7 +945,7 @@ function dyckView(
     moves: humpMoves(state, info),
   }));
   return (
-    <g transform={translate(DYCK_ORIGIN.x, DYCK_ORIGIN.y)}>
+    <g transform={translate(DYCK_ORIGIN)}>
       {/* grid */}
       {_.range(n + 1).map((k) => (
         <line
@@ -1014,20 +988,6 @@ function dyckView(
         //   nested humps sitting on top of it.
         const h = -anchor.y;
         const w = pts[segs[1].b].x - anchor.x;
-        const tile =
-          tiles === "strips"
-            ? [
-                [0, 0],
-                [u, -u],
-                [h + 2 * u, h],
-                [h, h],
-              ]
-            : [
-                [0, 0],
-                [w, 0],
-                [w - u, -u],
-                [u, -u],
-              ];
         return (
           <g
             id={`dyck-${info.node.id}`}
@@ -1036,16 +996,18 @@ function dyckView(
             dragologyOnDrag={moves.length > 0 && (() => slideSpec(d, moves))}
           >
             <polygon
-              points={tile.map(([x, y]) => `${x},${y}`).join(" ")}
+              points={
+                tiles === "strips"
+                  ? path([0, 0], [u, -u], [h + 2 * u, h], [h, h])
+                  : path([0, 0], [w, 0], [w - u, -u], [u, -u])
+              }
               fill={nodeFill(info.node.id)}
             />
             {segs.map(({ a, b }) => {
               const line = (stroke: string, strokeWidth: number) => (
                 <line
-                  x1={pts[a].x - anchor.x}
-                  y1={pts[a].y - anchor.y}
-                  x2={pts[b].x - anchor.x}
-                  y2={pts[b].y - anchor.y}
+                  {...pts[a].sub(anchor).xy1()}
+                  {...pts[b].sub(anchor).xy2()}
                   stroke={stroke}
                   strokeWidth={strokeWidth}
                   strokeLinecap="round"
@@ -1079,7 +1041,7 @@ function pairingView(
   let depth = 0;
   const depthAt = steps.map((s) => (s.dir === "U" ? depth++ : --depth));
   return (
-    <g transform={translate(PAIR_ORIGIN.x, PAIR_ORIGIN.y)}>
+    <g transform={translate(PAIR_ORIGIN)}>
       {[...infos.values()].map((info) => {
         const id = info.node.id;
         const i = steps.findIndex((s) => s.id === id && s.dir === "U");
@@ -1162,7 +1124,7 @@ function parenView(
     </g>
   );
   return (
-    <g transform={translate(PAREN_ORIGIN.x, PAREN_ORIGIN.y)}>
+    <g transform={translate(PAREN_ORIGIN)}>
       {tokens.map(
         (t, i) =>
           t.kind === "letter" && (
@@ -1205,16 +1167,14 @@ function miniTriangulation(tree: Node, r: number): Svgx {
   return (
     <g>
       <polygon
-        points={V.map((v) => `${v.x},${v.y}`).join(" ")}
+        points={path(...V)}
         fill="white"
         stroke="#94a3b8"
         strokeWidth={1}
       />
       <line
-        x1={V[0].x}
-        y1={V[0].y}
-        x2={V[m - 1].x}
-        y2={V[m - 1].y}
+        {...V[0].xy1()}
+        {...V[m - 1].xy2()}
         stroke="#64748b"
         strokeWidth={2}
       />
@@ -1222,10 +1182,8 @@ function miniTriangulation(tree: Node, r: number): Svgx {
         .filter(({ parent }) => parent !== null)
         .map(({ lo, hi }) => (
           <line
-            x1={V[lo].x}
-            y1={V[lo].y}
-            x2={V[hi + 1].x}
-            y2={V[hi + 1].y}
+            {...V[lo].xy1()}
+            {...V[hi + 1].xy2()}
             stroke="#64748b"
             strokeWidth={1.2}
           />
@@ -1250,16 +1208,14 @@ function latticeView(
     .filter(({ parent }) => parent !== null)
     .map((info) => ({ move: flipMove(state, info.node.id) }));
   return (
-    <g transform={translate(LAT_ORIGIN.x, LAT_ORIGIN.y)}>
+    <g transform={translate(LAT_ORIGIN)}>
       {lattice.edges.map(([a, b, cls]) => {
         const va = lattice.byKey.get(a)!;
         const vb = lattice.byKey.get(b)!;
         return (
           <line
-            x1={va.x}
-            y1={va.y}
-            x2={vb.x}
-            y2={vb.y}
+            {...va.pos.xy1()}
+            {...vb.pos.xy2()}
             stroke={showColors ? classColor(cls, lattice.classes) : "#cbd5e1"}
             strokeWidth={1.5}
             opacity={showColors ? 0.45 : 1}
@@ -1296,13 +1252,11 @@ function latticeView(
         </g>
       )}
       {lattice.vertices.map((v) => (
-        <g transform={translate(v.x, v.y)}>
-          {miniTriangulation(v.tree, miniR)}
-        </g>
+        <g transform={translate(v.pos)}>{miniTriangulation(v.tree, miniR)}</g>
       ))}
       <g
         id="token"
-        transform={translate(current.x, current.y)}
+        transform={translate(current.pos)}
         dragologyZIndex={draggedId === "token" ? "/1" : 1}
         style={{ cursor: "grab" }}
         dragologyOnDrag={() =>
@@ -1329,10 +1283,10 @@ function latticeView(
   );
 }
 
-function label(x: number, y: number, text: string): Svgx {
+function label(pos: Vec2able, text: string): Svgx {
   return (
     <text
-      transform={translate(x, y)}
+      transform={translate(pos)}
       fontSize={11}
       fontWeight={600}
       letterSpacing={1}
@@ -1352,17 +1306,17 @@ function makeDraggable(
     const infos = analyze(state.root);
     return (
       <g fontFamily="system-ui, sans-serif">
-        {label(20, 30, "triangulation")}
+        {label(Vec2(20, 30), "triangulation")}
         {polygonView(state, infos, d, n)}
-        {label(TREE_ORIGIN.x - 10, 30, "binary tree")}
+        {label(Vec2(TREE_ORIGIN.x - 10, 30), "binary tree")}
         {treeView(state, infos, d, n, draggedId)}
-        {label(DYCK_ORIGIN.x - 10, 30, "dyck path")}
+        {label(Vec2(DYCK_ORIGIN.x - 10, 30), "dyck path")}
         {dyckView(state, infos, d, n, dyckTiles)}
-        {label(PAIR_ORIGIN.x - 10, 215, "pairing")}
+        {label(Vec2(PAIR_ORIGIN.x - 10, 215), "pairing")}
         {pairingView(state, infos, d, n)}
-        {label(PAREN_ORIGIN.x - 15, PAREN_ORIGIN.y - 24, "parenthesization")}
+        {label(PAREN_ORIGIN.add(Vec2(-15, -24)), "parenthesization")}
         {parenView(state, infos, d)}
-        {label(20, LAT_ORIGIN.y - 30, "tamari lattice")}
+        {label(Vec2(20, LAT_ORIGIN.y - 30), "tamari lattice")}
         {latticeView(state, infos, d, n, draggedId, showLatticeColors)}
       </g>
     );

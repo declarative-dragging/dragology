@@ -537,7 +537,7 @@ const draggable: Draggable<Model> = ({
         <polygon
           className="sf-head"
           transform={translate(Q) + rotateDeg(angle)}
-          points={`0,0 ${-HEAD},${-6} ${-HEAD},6`}
+          points={path([0, 0], [-HEAD, -6], [-HEAD, 6])}
           fill={MUTED}
         />
         <g
@@ -667,7 +667,7 @@ const draggable: Draggable<Model> = ({
           dragologyOnDrag={() => moveLinkHead(lid)}
         >
           <circle r={7} fill="transparent" />
-          <polygon points="0,0 -7,-4 -7,4" fill={s.color} />
+          <polygon points={path([0, 0], [-7, -4], [-7, 4])} fill={s.color} />
         </g>
         {typeof l.to === "string" && (
           <g
@@ -1229,6 +1229,8 @@ function LongRunChart({
   const sw = pid && p ? sweep(m, pid) : null;
   const run = simulate(m);
   const xOf = (v: number) => sliderX(v, p!.min, p!.max, SX0, SX1);
+  const ptOf = (x: number, s: Stock, row: Row, v: number) =>
+    Vec2(xOf(x), yOf(s, row, v));
 
   return (
     <svg
@@ -1280,27 +1282,23 @@ function LongRunChart({
             {runs
               .filter((r) => r.length > 1)
               .map((r, k) => {
-                const hiPts = r.map(
-                  ([x, [, hi]]) => `${xOf(x)},${yOf(s, row, hi)}`,
-                );
-                const loPts = r.map(
-                  ([x, [lo]]) => `${xOf(x)},${yOf(s, row, lo)}`,
-                );
+                const hiPts = r.map(([x, [, hi]]) => ptOf(x, s, row, hi));
+                const loPts = r.map(([x, [lo]]) => ptOf(x, s, row, lo));
                 return (
                   <g key={k}>
                     <polygon
-                      points={[...hiPts, ...loPts.reverse()].join(" ")}
+                      points={path(...hiPts, ...loPts.reverse())}
                       fill={s.color}
                       opacity={0.2}
                     />
                     <polyline
-                      points={hiPts.join(" ")}
+                      points={path(...hiPts)}
                       fill="none"
                       stroke={s.color}
                       strokeWidth={1.5}
                     />
                     <polyline
-                      points={loPts.reverse().join(" ")}
+                      points={path(...loPts.reverse())}
                       fill="none"
                       stroke={s.color}
                       strokeWidth={1.5}
@@ -1311,22 +1309,18 @@ function LongRunChart({
             {p && !run.diverged && (
               <g>
                 <line
-                  x1={xOf(p.value)}
-                  x2={xOf(p.value)}
-                  y1={yOf(s, row, Math.min(...tail))}
-                  y2={yOf(s, row, Math.max(...tail))}
+                  {...ptOf(p.value, s, row, Math.min(...tail)).xy1}
+                  {...ptOf(p.value, s, row, Math.max(...tail)).xy2}
                   stroke={s.color}
                   strokeWidth={3}
                 />
                 <circle
-                  cx={xOf(p.value)}
-                  cy={yOf(s, row, Math.min(...tail))}
+                  {...ptOf(p.value, s, row, Math.min(...tail)).cxy}
                   r={3}
                   fill={s.color}
                 />
                 <circle
-                  cx={xOf(p.value)}
-                  cy={yOf(s, row, Math.max(...tail))}
+                  {...ptOf(p.value, s, row, Math.max(...tail)).cxy}
                   r={3}
                   fill={s.color}
                 />

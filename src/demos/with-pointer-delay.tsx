@@ -19,6 +19,7 @@ import {
   type OpTreeViewProps,
   OverlayVis,
   param,
+  path,
   translate,
   Vec2,
 } from "../lib";
@@ -63,9 +64,7 @@ const pointerDelay = modifier(
           <OverlayVis op={this.inner.op} active={active} />
           <g opacity={opacity}>
             <polyline
-              points={this.log
-                .map(({ pointer: p }) => `${p.x},${p.y}`)
-                .join(" ")}
+              points={path(...this.log.map(({ pointer }) => pointer))}
               fill="none"
               stroke="magenta"
               strokeWidth={1}

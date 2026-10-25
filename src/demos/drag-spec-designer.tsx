@@ -5,7 +5,7 @@ import { DemoDraggable } from "../demo/ui";
 import { Draggable } from "../draggable";
 import { DragSpec, DragSpecBuilder, inOrder, param } from "../DragSpec";
 import { Vec2 } from "../math/vec2";
-import { translate } from "../svgx/helpers";
+import { path, translate } from "../svgx/helpers";
 import { makeId } from "../utils";
 
 // ─── Types ───
@@ -297,7 +297,7 @@ function renderDiamond(label: string) {
   return (
     <g>
       <polygon
-        points={`0,${-r} ${r},0 0,${r} ${-r},0`}
+        points={path([0, -r], [r, 0], [0, r], [-r, 0])}
         fill={STATE_FILL[label]}
         strokeLinejoin="round"
       />
@@ -461,7 +461,7 @@ export const draggable: Draggable<State> = ({ state, d, draggedId }) => {
         preview: (
           <g>
             <polygon
-              points={`0,-10 10,0 0,10 -10,0`}
+              points={path([0, -10], [10, 0], [0, 10], [-10, 0])}
               fill={STATE_FILL[l]}
               strokeLinejoin="round"
             />

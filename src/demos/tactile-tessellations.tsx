@@ -5,7 +5,7 @@ import { DemoDraggable } from "../demo/ui";
 import { Draggable } from "../draggable";
 import { param } from "../DragSpec";
 import { Vec2 } from "../math/vec2";
-import { rotateDeg, translate } from "../svgx/helpers";
+import { path, rotateDeg, translate } from "../svgx/helpers";
 import { makeId } from "../utils";
 
 // --- Shape geometry ---
@@ -22,12 +22,6 @@ function shapeVertices({ n }: ShapeKind): Vec2[] {
   return Array.from({ length: n }, (_, i) =>
     Vec2.polarDeg(R, (360 * (i - 0.5)) / n + 90),
   );
-}
-
-function shapePoints(kind: ShapeKind): string {
-  return shapeVertices(kind)
-    .map((v) => v.str(" "))
-    .join(" ");
 }
 
 // --- Edge representation for snapping ---
@@ -242,7 +236,7 @@ const draggable: Draggable<State> = ({ state, d, draggedId }) => {
             id={`shape-${shape.id}`}
             transform={translate(shape.x, shape.y) + rotateDeg(shape.rotDeg)}
             dragologyZIndex={isDragged ? 10 : 1}
-            points={shapePoints(shape.kind)}
+            points={path(...shapeVertices(shape.kind))}
             fill={getFillColor(shape.kind)}
             stroke={getStrokeColor(shape.kind)}
             strokeWidth={2}
@@ -323,7 +317,7 @@ const draggable: Draggable<State> = ({ state, d, draggedId }) => {
       {PALETTE_ITEMS.map((item) => (
         <polygon
           transform={translate(item.x, item.y)}
-          points={shapePoints(item.kind)}
+          points={path(...shapeVertices(item.kind))}
           fill={getFillColor(item.kind)}
           stroke={getStrokeColor(item.kind)}
           strokeWidth={2}
