@@ -1,7 +1,8 @@
 // Rearranging equations by direct manipulation, after Graspable Math
 // (graspablemath.com): drag a term across the equals sign and its sign
 // flips, drag a factor across and it divides the other side, drop one
-// term onto another to combine them.
+// term onto another to combine them, an exponent onto its base to
+// multiply it out, a log's base onto its argument to evaluate it.
 
 import _ from "lodash";
 import { Children, isValidElement, useState } from "react";
@@ -30,8 +31,11 @@ type Term = { sign: 1 | -1; expr: Expr };
 type Sum = { kind: "sum"; id: string; terms: Term[] };
 type Prod = { kind: "prod"; id: string; factors: Expr[] };
 type Frac = { kind: "frac"; id: string; num: Expr; den: Expr };
+type Pow = { kind: "pow"; id: string; base: Expr; exp: Expr };
+/** log_base(arg). */
+type Log = { kind: "log"; id: string; base: Expr; arg: Expr };
 /** Numbers are never negative: signs live on the terms of sums. */
-type Expr = Num | Var | Sum | Prod | Frac;
+type Expr = Num | Var | Sum | Prod | Frac | Pow | Log;
 
 type Side = "lhs" | "rhs";
 type State = {
@@ -44,10 +48,15 @@ type State = {
   puff?: Puff;
 };
 /**
- * The node, its sign if it's a term, and where to draw it: where the
- * node it's folding into is now.
+ * The node, its sign if it's a term, its size (smaller in a superscript),
+ * and where to draw it: where the node it's folding into is now.
  */
-type Puff = { expr: Expr; sign: 1 | -1 | null; at: { x: number; y: number } };
+type Puff = {
+  expr: Expr;
+  sign: 1 | -1 | null;
+  size: number;
+  at: { x: number; y: number };
+};
 
 const newId = () => `n-${makeId()}`;
 const num = (value: number, id = newId()): Num => ({ kind: "num", id, value });
@@ -60,7 +69,8 @@ const factorsOf = (e: Expr): Expr[] => (e.kind === "prod" ? e.factors : [e]);
 
 // The constructors keep expressions in normal form: no sums or
 // products of fewer than two things (except a lone negated term), no
-// sums directly inside sums or products inside products, no "/1".
+// sums directly inside sums or products inside products, no "/1" or
+// "^1".
 
 function mkSum(terms: Term[], id: string): Expr {
   const flat = terms.flatMap((t): Term[] =>
@@ -87,6 +97,11 @@ function mkFrac(numer: Expr, den: Expr, id: string): Expr {
   return { kind: "frac", id, num: numer, den };
 }
 
+function mkPow(base: Expr, exp: Expr, id: string): Expr {
+  if (isNum(exp, 1)) return base;
+  return { kind: "pow", id, base, exp };
+}
+
 function normalize(e: Expr): Expr {
   switch (e.kind) {
     case "num":
@@ -101,6 +116,10 @@ function normalize(e: Expr): Expr {
       return mkProd(e.factors.map(normalize), e.id);
     case "frac":
       return mkFrac(normalize(e.num), normalize(e.den), e.id);
+    case "pow":
+      return mkPow(normalize(e.base), normalize(e.exp), e.id);
+    case "log":
+      return { ...e, base: normalize(e.base), arg: normalize(e.arg) };
   }
 }
 
@@ -119,6 +138,10 @@ function mapExpr(e: Expr, id: string, f: (e: Expr) => Expr): Expr {
       return { ...e, factors: e.factors.map((x) => mapExpr(x, id, f)) };
     case "frac":
       return { ...e, num: mapExpr(e.num, id, f), den: mapExpr(e.den, id, f) };
+    case "pow":
+      return { ...e, base: mapExpr(e.base, id, f), exp: mapExpr(e.exp, id, f) };
+    case "log":
+      return { ...e, base: mapExpr(e.base, id, f), arg: mapExpr(e.arg, id, f) };
   }
 }
 
@@ -154,6 +177,20 @@ function cloneFresh(e: Expr): Expr {
         num: cloneFresh(e.num),
         den: cloneFresh(e.den),
       };
+    case "pow":
+      return {
+        ...e,
+        id: newId(),
+        base: cloneFresh(e.base),
+        exp: cloneFresh(e.exp),
+      };
+    case "log":
+      return {
+        ...e,
+        id: newId(),
+        base: cloneFresh(e.base),
+        arg: cloneFresh(e.arg),
+      };
   }
 }
 
@@ -170,6 +207,10 @@ function exprKey(e: Expr): string {
       return `[${e.factors.map(exprKey).sort().join("*")}]`;
     case "frac":
       return `{${exprKey(e.num)}/${exprKey(e.den)}}`;
+    case "pow":
+      return `<${exprKey(e.base)}^${exprKey(e.exp)}>`;
+    case "log":
+      return `log<${exprKey(e.base)}>(${exprKey(e.arg)})`;
   }
 }
 
@@ -218,30 +259,77 @@ function combineTerms(t: Term, u: Term): Term[] | null {
   return [{ sign: c < 0 ? -1 : 1, expr }];
 }
 
-/** `f` × `e`, folding a number into `e`'s numeric coefficient. */
+/**
+ * `e` as base^n, for a whole number n (so x is x^1). Not for numbers,
+ * which multiply out instead.
+ */
+function powerOf(e: Expr): { base: Expr; n: number } | null {
+  if (e.kind === "num") return null;
+  if (e.kind === "pow") {
+    return e.exp.kind === "num" ? { base: e.base, n: e.exp.value } : null;
+  }
+  return { base: e, n: 1 };
+}
+
+/**
+ * Drop factor `f` onto factor `g` of the same product: their product as
+ * one factor, if numbers multiply or powers of one base add exponents.
+ */
+function mergeFactors(f: Expr, g: Expr): Expr | null {
+  if (f.kind === "num" && g.kind === "num") return num(f.value * g.value, g.id);
+  const a = powerOf(f);
+  const b = powerOf(g);
+  if (!a || !b || exprKey(a.base) !== exprKey(b.base)) return null;
+  const n = a.n + b.n;
+  if (g.kind === "pow") return { ...g, exp: num(n, g.exp.id) };
+  return { kind: "pow", id: newId(), base: g, exp: num(n) };
+}
+
+/** `f` × `e`, folding each factor of `f` into a factor of `e` it merges with. */
 function multiplyInto(f: Expr, e: Expr): Expr {
   if (e.kind === "frac") return mkFrac(multiplyInto(f, e.num), e.den, e.id);
   if (e.kind === "sum") return mkProd([f, e], newId());
-  const factors = factorsOf(e);
-  const prodId = e.kind === "prod" ? e.id : newId();
-  const k = factors.findIndex((g) => g.kind === "num");
-  if (f.kind === "num" && k >= 0) {
-    const g = factors[k] as Num;
-    const folded = factors.map((h, i) =>
-      i === k ? num(f.value * g.value, g.id) : h,
-    );
-    return mkProd(folded, prodId);
-  }
-  return mkProd([f, ...factors], prodId);
+  return factorsOf(f).reduce((acc, g) => multiplyFactor(g, acc), e);
 }
 
-/** Drop factor `f` onto the sum `g` it multiplies. */
+function multiplyFactor(f: Expr, e: Expr): Expr {
+  if (isNum(f, 1)) return e;
+  if (isNum(e, 1)) return f;
+  const factors = factorsOf(e);
+  const prodId = e.kind === "prod" ? e.id : newId();
+  for (let k = 0; k < factors.length; k++) {
+    const merged = mergeFactors(f, factors[k]);
+    if (merged) {
+      return mkProd(
+        factors.map((h, i) => (i === k ? merged : h)),
+        prodId,
+      );
+    }
+  }
+  // Numbers go first, other factors after the numbers.
+  const at =
+    f.kind === "num" ? 0 : _.takeWhile(factors, (g) => g.kind === "num").length;
+  return mkProd(insertAt(factors, at, f), prodId);
+}
+
+/**
+ * Drop factor `f` onto the sum `g` it multiplies. A sum `f` multiplies
+ * out term by term.
+ */
 function distribute(f: Expr, g: Sum): Expr {
   return mkSum(
-    g.terms.map((t) => ({
-      sign: t.sign,
-      expr: multiplyInto(cloneFresh(f), t.expr),
-    })),
+    termsOf(f).flatMap((t, i) =>
+      g.terms.map(
+        (u): Term => ({
+          sign: (t.sign * u.sign) as 1 | -1,
+          // `g`'s terms keep their ids the first time round.
+          expr: multiplyInto(
+            cloneFresh(t.expr),
+            i === 0 ? u.expr : cloneFresh(u.expr),
+          ),
+        }),
+      ),
+    ),
     g.id,
   );
 }
@@ -259,8 +347,47 @@ function cancel(f: Expr, g: Expr): { f: Expr | null; g: Expr | null } | null {
     // What's left of `f` is new, so that `f` itself folds away.
     return { f: left(f, newId()), g: left(g, g.id) };
   }
-  if (exprKey(f) === exprKey(g)) return { f: null, g: null };
+  const a = powerOf(f);
+  const b = powerOf(g);
+  if (!a || !b || exprKey(a.base) !== exprKey(b.base)) return null;
+  const k = Math.min(a.n, b.n);
+  if (k === 0) return null;
+  // Only a power can have exponent left over.
+  const lower = (e: Expr, n: number) =>
+    n === 0
+      ? null
+      : e.kind === "pow"
+        ? mkPow(e.base, num(n, e.exp.id), e.id)
+        : e;
+  const left = lower(f, a.n - k);
+  return { f: left && cloneFresh(left), g: lower(g, b.n - k) };
+}
+
+/** b^n as a number, if it's a whole one (and not too big). */
+function evalPow(base: Expr, exp: Expr): number | null {
+  if (base.kind !== "num") return null;
+  if (exp.kind === "num") {
+    const v = base.value ** exp.value;
+    return v <= 1e6 ? v : null;
+  }
+  // An nth root, if it comes out even.
+  if (exp.kind === "frac" && isNum(exp.num, 1) && exp.den.kind === "num") {
+    const n = exp.den.value;
+    const r = Math.round(base.value ** (1 / n));
+    return r ** n === base.value ? r : null;
+  }
   return null;
+}
+
+/** log_b(a), if it simplifies: to a whole number, or the exponent of a power of b. */
+function evalLog(b: Expr, a: Expr): Expr | null {
+  if (isNum(a, 1)) return num(0, a.id);
+  if (a.kind === "pow" && exprKey(a.base) === exprKey(b)) return a.exp;
+  if (exprKey(a) === exprKey(b)) return num(1, a.id);
+  if (b.kind !== "num" || a.kind !== "num" || b.value < 2) return null;
+  let k = 0;
+  for (let v = 1; v < a.value; v *= b.value) k++;
+  return b.value ** k === a.value ? num(k, a.id) : null;
 }
 
 /** Ways to write `e` ÷ `f`. */
@@ -312,6 +439,8 @@ type Ctx = {
   idle: boolean;
   /** Drawing a puff: the node itself is invisible, leaving only its cloud. */
   hidden?: boolean;
+  /** Type size, as a fraction of the full size (smaller in superscripts). */
+  size: number;
 };
 
 /** Where a node is drawn: its origin, and the left and right of its box. */
@@ -355,15 +484,18 @@ function nodeFinder(ctx: Ctx): Where {
  * the dragged node is folded into. Over the target, it's a puff.
  */
 function mergeTarget(
-  { state, d }: Ctx,
+  ctx: Ctx,
   where: Where,
   targetId: string,
-  dragged: Omit<Puff, "at">,
+  dragged: Omit<Puff, "at" | "size">,
   merged: State,
 ): DragSpec<State> {
   const { x, y } = where(targetId);
-  const preview = { ...merged, puff: { ...dragged, at: { x, y } } };
-  return d.dropTarget(targetId, preview, { boundsState: state }).onDrop(merged);
+  const puff = { ...dragged, size: ctx.size, at: { x, y } };
+  const preview = { ...merged, puff };
+  return ctx.d
+    .dropTarget(targetId, preview, { boundsState: ctx.state })
+    .onDrop(merged);
 }
 
 /** Counts the wrapped spec out of a `closest` (infinite gap) except when `when(pointer)`. */
@@ -511,12 +643,7 @@ function factorDrag(ctx: Ctx, list: FactorList, idx: number): DragSpec<State> {
 
   factors.forEach((g, k) => {
     if (k === idx) return;
-    let merged: Expr | null = null;
-    if (f.kind === "num" && g.kind === "num") {
-      merged = num(f.value * g.value, g.id);
-    } else if (g.kind === "sum" && f.kind !== "sum") {
-      merged = distribute(f, g);
-    }
+    const merged = g.kind === "sum" ? distribute(f, g) : mergeFactors(f, g);
     if (!merged) return;
     const next = factors.flatMap((h, i) =>
       i === idx ? [] : i === k ? [merged] : [h],
@@ -574,6 +701,88 @@ function factorDrag(ctx: Ctx, list: FactorList, idx: number): DragSpec<State> {
   return d.closest(targets).whenFar(state).withFloating();
 }
 
+/**
+ * Drag the exponent of `pow`: onto its base to work it out (or write
+ * it as a product), across the equals sign as a root (if `pow` is
+ * `side`, and the root is odd, so there's only one), or out in front of
+ * `log`, if `pow` is its argument.
+ */
+function expDrag(
+  ctx: Ctx,
+  pow: Pow,
+  side: Side | null,
+  log: Log | null,
+): DragSpec<State> {
+  const { state, d } = ctx;
+  const { base, exp } = pow;
+  const targets: (State | DragSpec<State>)[] = [];
+  const n = exp.kind === "num" ? exp.value : null;
+  const v = evalPow(base, exp);
+  const worked =
+    v !== null
+      ? num(v, base.id)
+      : n !== null && n >= 2 && n <= 5
+        ? mkProd([base, ..._.range(n - 1).map(() => cloneFresh(base))], newId())
+        : null;
+  if (worked) {
+    targets.push(
+      mergeTarget(
+        ctx,
+        nodeFinder(ctx),
+        base.id,
+        { expr: exp, sign: null },
+        replaceNode(state, pow.id, worked),
+      ),
+    );
+  }
+  if (side && n !== null && n % 2 === 1) {
+    const o = otherSide(side);
+    const root = mkPow(state[o], mkFrac(num(1), exp, newId()), newId());
+    targets.push(setSide(setSide(state, side, base), o, root));
+  }
+  if (log) {
+    const pulled = mkProd([exp, { ...log, arg: base }], newId());
+    targets.push(replaceNode(state, log.id, pulled));
+  }
+  return d.closest(targets).whenFar(state).withFloating();
+}
+
+/** Drag the base of `pow`, which is `side`, across: b^A = C becomes A = log_b(C). */
+function powBaseDrag(ctx: Ctx, pow: Pow, side: Side): DragSpec<State> {
+  const { state, d } = ctx;
+  const o = otherSide(side);
+  const log: Log = { kind: "log", id: newId(), base: pow.base, arg: state[o] };
+  const target = setSide(setSide(state, side, pow.exp), o, log);
+  return d.closest([target]).whenFar(state).withFloating();
+}
+
+/**
+ * Drag the base of `log`: onto its argument to work it out, or across
+ * the equals sign (if `log` is `side`): log_b(A) = C becomes A = b^C.
+ */
+function logBaseDrag(ctx: Ctx, log: Log, side: Side | null): DragSpec<State> {
+  const { state, d } = ctx;
+  const targets: (State | DragSpec<State>)[] = [];
+  const v = evalLog(log.base, log.arg);
+  if (v) {
+    targets.push(
+      mergeTarget(
+        ctx,
+        nodeFinder(ctx),
+        log.arg.id,
+        { expr: log.base, sign: null },
+        replaceNode(state, log.id, v),
+      ),
+    );
+  }
+  if (side) {
+    const o = otherSide(side);
+    const pow = mkPow(log.base, state[o], newId());
+    targets.push(setSide(setSide(state, side, log.arg), o, pow));
+  }
+  return d.closest(targets).whenFar(state).withFloating();
+}
+
 // # Layout
 
 const FONT = 34;
@@ -586,31 +795,41 @@ const BASELINE = 128;
 const EQ_X = W / 2;
 const EQ_GAP = 0.55 * EM;
 
-const ASC = 0.72 * EM;
-const DESC = 0.24 * EM;
-const DIGIT_W = 0.5 * EM;
-const LETTER_W = 0.5 * EM;
-const PAREN_W = 0.36 * EM;
-const BAR_AXIS = 0.27 * EM;
-const BAR_GAP = 0.1 * EM;
-const BAR_OVERHANG = 0.12 * EM;
+// Metrics, in ems.
+const ASC = 0.72;
+const DESC = 0.24;
+const DIGIT_W = 0.5;
+const LETTER_W = 0.5;
+const PAREN_W = 0.36;
+const BAR_AXIS = 0.27;
+const BAR_GAP = 0.1;
+const BAR_OVERHANG = 0.12;
+const LOG_W = 1.3;
+/** The size of superscripts and subscripts, relative to what they're on. */
+const SCRIPT = 0.62;
 
-const textProps = {
-  fontSize: FONT,
-  fontFamily: FONT_FAMILY,
-  fill: INK,
-  textAnchor: "middle",
-  pointerEvents: "none",
-} as const;
+const textProps = (size: number) =>
+  ({
+    fontSize: FONT * size,
+    fontFamily: FONT_FAMILY,
+    fill: INK,
+    textAnchor: "middle",
+    pointerEvents: "none",
+  }) as const;
 
 /** A glyph drawn before a node: a term's sign, or a multiplication dot. */
 type Lead = { text: string; w: number };
 const NO_LEAD: Lead = { text: "", w: 0 };
-const DOT_LEAD: Lead = { text: "·", w: 0.42 * EM };
-function termLead(sign: 1 | -1, i: number): Lead {
-  if (i === 0) return sign < 0 ? { text: "−", w: 0.68 * EM } : NO_LEAD;
-  return { text: sign < 0 ? "−" : "+", w: 1.1 * EM };
+const dotLead = (size: number): Lead => ({ text: "·", w: 0.42 * EM * size });
+function termLead(sign: 1 | -1, i: number, size: number): Lead {
+  const em = EM * size;
+  if (i === 0) return sign < 0 ? { text: "−", w: 0.68 * em } : NO_LEAD;
+  return { text: sign < 0 ? "−" : "+", w: 1.1 * em };
 }
+
+/** Juxtaposing this after a number would read as one number. */
+const leadsWithDigit = (e: Expr): boolean =>
+  e.kind === "num" || (e.kind === "pow" && leadsWithDigit(e.base));
 
 type Place = {
   lead: Lead;
@@ -626,6 +845,8 @@ type Place = {
   parens?: boolean;
   /** For a product above or below a fraction bar. */
   factorList?: FactorList;
+  /** This node is the argument of `log`. */
+  log?: Log;
   /** Draw a cloud behind this node. */
   puff?: boolean;
 };
@@ -648,9 +869,10 @@ const visible = (ctx: Ctx, shown: boolean) => (shown && !ctx.hidden ? 1 : 0);
 
 function layout(e: Expr, p: Place, ctx: Ctx, side: Side): Box {
   const inner = layoutInner(e, p, ctx, side);
+  const em = EM * ctx.size;
   const w = p.lead.w + inner.w;
-  const asc = Math.max(ASC, inner.asc);
-  const desc = Math.max(DESC, inner.desc);
+  const asc = Math.max(ASC * em, inner.asc);
+  const desc = Math.max(DESC * em, inner.desc);
   return {
     w,
     asc,
@@ -678,7 +900,7 @@ function layout(e: Expr, p: Place, ctx: Ctx, side: Side): Box {
         />
         <text
           transform={translate(-p.lead.w / 2, 0)}
-          {...textProps}
+          {...textProps(ctx.size)}
           opacity={visible(ctx, !!p.lead.text)}
         >
           {p.lead.text || "+"}
@@ -686,7 +908,7 @@ function layout(e: Expr, p: Place, ctx: Ctx, side: Side): Box {
         {inner.draw()}
         {p.puff && (
           <g id={`${e.id}-puff`} dragologyZIndex={-1}>
-            {drawPoof(inner.w / 2, -0.3 * EM)}
+            {drawPoof(inner.w / 2, -0.3 * em, em)}
           </g>
         )}
       </g>
@@ -696,25 +918,25 @@ function layout(e: Expr, p: Place, ctx: Ctx, side: Side): Box {
 
 /** A lumpy cluster of bumps (x, y, r, in ems), off-center on purpose. */
 const POOF_BUMPS = [
-  [-0.3, 0.06, 0.24],
-  [-0.06, -0.16, 0.3],
-  [0.26, -0.04, 0.25],
-  [0.14, 0.2, 0.2],
-  [-0.14, 0.2, 0.17],
+  [-0.2, 0.04, 0.16],
+  [-0.04, -0.11, 0.2],
+  [0.17, -0.03, 0.17],
+  [0.09, 0.13, 0.13],
+  [-0.09, 0.13, 0.11],
 ];
 /** Little wisps flying off it. */
 const POOF_WISPS = [
-  [0.62, -0.34, 0.09],
-  [-0.62, -0.26, 0.065],
-  [0.52, 0.32, 0.055],
+  [0.47, -0.26, 0.09],
+  [-0.47, -0.2, 0.065],
+  [0.39, 0.24, 0.055],
 ];
 
 /** A cartoon puff of smoke, the size of a character, centered at (`cx`, `cy`). */
-function drawPoof(cx: number, cy: number): Svgx {
+function drawPoof(cx: number, cy: number, em: number): Svgx {
   const circle = (
     [x, y, r]: number[],
     props: React.SVGProps<SVGCircleElement>,
-  ) => <circle transform={translate(x * EM, y * EM)} r={r * EM} {...props} />;
+  ) => <circle transform={translate(x * em, y * em)} r={r * em} {...props} />;
   const outline = { fill: "none", stroke: "#94a3b8", strokeWidth: 3 };
   const fill = { fill: "#f8fafc" };
   return (
@@ -733,20 +955,22 @@ function drawPoof(cx: number, cy: number): Svgx {
 function layoutInner(e: Expr, p: Place, ctx: Ctx, side: Side): Inner {
   const childInert = p.inert || p.atomic;
   const { state } = ctx;
+  const em = EM * ctx.size;
+  const text = textProps(ctx.size);
 
   switch (e.kind) {
     case "num":
     case "var": {
       const label = e.kind === "num" ? String(e.value) : e.name;
-      const w = e.kind === "num" ? label.length * DIGIT_W : LETTER_W;
+      const w = (e.kind === "num" ? label.length * DIGIT_W : LETTER_W) * em;
       return {
         w,
-        asc: ASC,
-        desc: DESC,
+        asc: ASC * em,
+        desc: DESC * em,
         draw: () => [
           <text
             transform={translate(w / 2, 0)}
-            {...textProps}
+            {...text}
             fontStyle={e.kind === "var" ? "italic" : "normal"}
             opacity={visible(ctx, true)}
           >
@@ -765,7 +989,7 @@ function layoutInner(e: Expr, p: Place, ctx: Ctx, side: Side): Inner {
         layout(
           t.expr,
           {
-            lead: termLead(t.sign, i),
+            lead: termLead(t.sign, i, ctx.size),
             drag: childInert
               ? null
               : () => termDrag(ctx, e.terms, i, setTerms, across),
@@ -777,7 +1001,7 @@ function layoutInner(e: Expr, p: Place, ctx: Ctx, side: Side): Inner {
           side,
         ),
       );
-      const pw = p.parens ? PAREN_W : 0;
+      const pw = p.parens ? PAREN_W * em : 0;
       const xs = kids.reduce<number[]>(
         (acc, k) => [...acc, acc[acc.length - 1] + k.w],
         [pw],
@@ -791,15 +1015,15 @@ function layoutInner(e: Expr, p: Place, ctx: Ctx, side: Side): Inner {
         desc,
         draw: () => [
           <text
-            transform={translate(PAREN_W / 2, 0)}
-            {...textProps}
+            transform={translate((PAREN_W * em) / 2, 0)}
+            {...text}
             opacity={visible(ctx, !!p.parens)}
           >
             (
           </text>,
           <text
-            transform={translate(w - PAREN_W / 2, 0)}
-            {...textProps}
+            transform={translate(w - (PAREN_W * em) / 2, 0)}
+            {...text}
             opacity={visible(ctx, !!p.parens)}
           >
             )
@@ -820,7 +1044,7 @@ function layoutInner(e: Expr, p: Place, ctx: Ctx, side: Side): Inner {
         layout(
           f,
           {
-            lead: i > 0 && f.kind === "num" ? DOT_LEAD : NO_LEAD,
+            lead: i > 0 && leadsWithDigit(f) ? dotLead(ctx.size) : NO_LEAD,
             drag: childInert ? null : () => factorDrag(ctx, list, i),
             inert: childInert,
             atomic: false,
@@ -902,10 +1126,11 @@ function layoutInner(e: Expr, p: Place, ctx: Ctx, side: Side): Inner {
         );
       const top = part(e.num, numList);
       const bottom = part(e.den, denList);
-      const barW = Math.max(top.w, bottom.w) + 2 * BAR_OVERHANG;
-      const topY = -BAR_AXIS - BAR_GAP - top.desc;
-      const bottomY = -BAR_AXIS + BAR_GAP + bottom.asc;
-      const pad = 0.06 * EM;
+      const barW = Math.max(top.w, bottom.w) + 2 * BAR_OVERHANG * em;
+      const barY = -BAR_AXIS * em;
+      const topY = barY - BAR_GAP * em - top.desc;
+      const bottomY = barY + BAR_GAP * em + bottom.asc;
+      const pad = 0.06 * em;
       return {
         w: barW + 2 * pad,
         asc: -topY + top.asc,
@@ -913,16 +1138,148 @@ function layoutInner(e: Expr, p: Place, ctx: Ctx, side: Side): Inner {
         draw: () => [
           <line
             x1={pad}
-            y1={-BAR_AXIS}
+            y1={barY}
             x2={pad + barW}
-            y2={-BAR_AXIS}
+            y2={barY}
             stroke={INK}
-            strokeWidth={2}
+            strokeWidth={2 * ctx.size}
             opacity={visible(ctx, true)}
             pointerEvents="none"
           />,
           top.draw(pad + (barW - top.w) / 2, topY),
           bottom.draw(pad + (barW - bottom.w) / 2, bottomY),
+        ],
+      };
+    }
+
+    case "pow": {
+      const script = { ...ctx, size: ctx.size * SCRIPT };
+      const onSide = p.sideLevel && state[side].id === e.id ? side : null;
+      // A sum draws its own parens; anything but a number or letter
+      // needs them.
+      const wrap = !["num", "var", "sum"].includes(e.base.kind);
+      const pw = wrap ? PAREN_W * em : 0;
+      const base = layout(
+        e.base,
+        {
+          lead: NO_LEAD,
+          drag:
+            !childInert && onSide && e.base.kind === "num"
+              ? () => powBaseDrag(ctx, e, onSide)
+              : null,
+          inert: childInert,
+          atomic: false,
+          sideLevel: false,
+          parens: e.base.kind === "sum",
+        },
+        ctx,
+        side,
+      );
+      const exp = layout(
+        e.exp,
+        {
+          lead: NO_LEAD,
+          drag: childInert
+            ? null
+            : () => expDrag(script, e, onSide, p.log ?? null),
+          inert: childInert,
+          atomic: true,
+          sideLevel: false,
+        },
+        script,
+        side,
+      );
+      const expX = 2 * pw + base.w + 0.04 * em;
+      const expY = -Math.max(
+        0.42 * em,
+        base.asc - 0.3 * em,
+        exp.desc + 0.2 * em,
+      );
+      return {
+        w: expX + exp.w,
+        asc: Math.max(base.asc, exp.asc - expY),
+        desc: Math.max(base.desc, exp.desc + expY),
+        draw: () => [
+          <text
+            transform={translate((PAREN_W * em) / 2, 0)}
+            {...text}
+            opacity={visible(ctx, wrap)}
+          >
+            (
+          </text>,
+          <text
+            transform={translate(pw + base.w + (PAREN_W * em) / 2, 0)}
+            {...text}
+            opacity={visible(ctx, wrap)}
+          >
+            )
+          </text>,
+          base.draw(pw, 0),
+          exp.draw(expX, expY),
+        ],
+      };
+    }
+
+    case "log": {
+      const script = { ...ctx, size: ctx.size * SCRIPT };
+      const onSide = p.sideLevel && state[side].id === e.id ? side : null;
+      const base = layout(
+        e.base,
+        {
+          lead: NO_LEAD,
+          drag: childInert ? null : () => logBaseDrag(script, e, onSide),
+          inert: childInert,
+          atomic: true,
+          sideLevel: false,
+        },
+        script,
+        side,
+      );
+      const arg = layout(
+        e.arg,
+        {
+          lead: NO_LEAD,
+          drag: null,
+          inert: childInert,
+          atomic: false,
+          sideLevel: false,
+          log: e,
+        },
+        ctx,
+        side,
+      );
+      const baseX = (LOG_W + 0.02) * em;
+      const baseY = 0.3 * em;
+      const pw = PAREN_W * em;
+      const argX = baseX + base.w + 0.04 * em + pw;
+      return {
+        w: argX + arg.w + pw,
+        asc: arg.asc,
+        desc: Math.max(arg.desc, baseY + base.desc),
+        draw: () => [
+          <text
+            transform={translate((LOG_W * em) / 2, 0)}
+            {...text}
+            opacity={visible(ctx, true)}
+          >
+            log
+          </text>,
+          <text
+            transform={translate(argX - pw / 2, 0)}
+            {...text}
+            opacity={visible(ctx, true)}
+          >
+            (
+          </text>,
+          <text
+            transform={translate(argX + arg.w + pw / 2, 0)}
+            {...text}
+            opacity={visible(ctx, true)}
+          >
+            )
+          </text>,
+          base.draw(baseX, baseY),
+          arg.draw(argX, 0),
         ],
       };
     }
@@ -953,9 +1310,11 @@ function layoutSide(ctx: Ctx, side: Side): Box {
 }
 
 /** A cloud where the node in `puff` would be. */
-function drawPuff(ctx: Ctx, { expr, sign, at }: Puff): Svgx {
+function drawPuff(ctx: Ctx, { expr, sign, size, at }: Puff): Svgx {
   const lead =
-    sign === null ? NO_LEAD : { text: sign < 0 ? "−" : "+", w: 0.68 * EM };
+    sign === null
+      ? NO_LEAD
+      : { text: sign < 0 ? "−" : "+", w: 0.68 * EM * size };
   const place: Place = {
     lead,
     drag: null,
@@ -966,7 +1325,7 @@ function drawPuff(ctx: Ctx, { expr, sign, at }: Puff): Svgx {
     puff: true,
   };
   // `draw` takes the left edge of the lead; `at` is the content's start.
-  return layout(expr, place, { ...ctx, hidden: true }, "lhs").draw(
+  return layout(expr, place, { ...ctx, hidden: true, size }, "lhs").draw(
     at.x - lead.w,
     at.y,
   );
@@ -995,6 +1354,7 @@ const isSolved = ({ lhs, rhs }: State) =>
   (rhs.kind === "var" && isNumber(lhs));
 
 function drawEquation(ctx: Ctx): Svgx {
+  ctx = { ...ctx, size: 1 };
   const { state } = ctx;
   const lhs = layoutSide(ctx, "lhs");
   const rhs = layoutSide(ctx, "rhs");
@@ -1028,7 +1388,7 @@ function drawEquation(ctx: Ctx): Svgx {
         />
       </g>
       {lhs.draw(EQ_X - EQ_GAP - lhs.w, BASELINE)}
-      <text transform={translate(EQ_X, BASELINE)} {...textProps}>
+      <text transform={translate(EQ_X, BASELINE)} {...textProps(1)}>
         =
       </text>
       {rhs.draw(EQ_X + EQ_GAP, BASELINE)}
@@ -1038,12 +1398,12 @@ function drawEquation(ctx: Ctx): Svgx {
 }
 
 const draggable: Draggable<State> = ({ state, d, draggedId }) =>
-  drawEquation({ state, d, idle: draggedId === null });
+  drawEquation({ state, d, idle: draggedId === null, size: 1 });
 
 // # Parsing (for the starting equations)
 
 function parse(src: string): State {
-  const toks = src.replace(/\s+/g, "").match(/\d+|[a-z]|[-+*/()=]/g)!;
+  const toks = src.replace(/\s+/g, "").match(/\d+|log|[a-z]|[-+*/()=^_]/g)!;
   let i = 0;
   const peek = () => toks[i];
   const next = () => toks[i++];
@@ -1064,7 +1424,7 @@ function parse(src: string): State {
   }
   function term(): Expr {
     const factors = [factor()];
-    while (peek() !== undefined && /^(\d+|[a-z]|\(|\*)$/.test(peek())) {
+    while (peek() !== undefined && /^(\d+|[a-z]+|\(|\*)$/.test(peek())) {
       if (peek() === "*") next();
       factors.push(factor());
     }
@@ -1076,11 +1436,22 @@ function parse(src: string): State {
     return e;
   }
   function factor(): Expr {
+    const base = atom();
+    if (peek() !== "^") return base;
+    next();
+    return mkPow(base, atom(), newId());
+  }
+  function atom(): Expr {
     const t = next();
     if (t === "(") {
       const e = sum();
       next();
       return e;
+    }
+    if (t === "log") {
+      next(); // _
+      const base = atom();
+      return { kind: "log", id: newId(), base, arg: atom() };
     }
     if (/^\d+$/.test(t)) return num(Number(t));
     return { kind: "var", id: newId(), name: t };
@@ -1097,7 +1468,29 @@ const EQUATIONS = [
   "x/4 + 1 = 3",
   "2(x + 1) = 10",
   "(x + 6)/3 = 2x - 3",
+  "(x + 3)^2 = x^2 + 15",
+  "2x^3 = 54",
+  "x^5/x^2 = 8",
+  "2^(x + 1) = 32",
+  "log_3(x) = 4",
+  "log_2(x^3) = 6",
 ].map((src) => ({ src, state: parse(src) }));
+
+/** An equation's source, with its exponents and subscripts set as such. */
+function prettySource(src: string) {
+  return src
+    .replace(/-/g, "−")
+    .split(/(\^\([^)]*\)|\^\w+|_\w+)/)
+    .map((part, i) =>
+      part.startsWith("^") ? (
+        <sup key={i}>{part.slice(1).replace(/^\((.*)\)$/, "$1")}</sup>
+      ) : part.startsWith("_") ? (
+        <sub key={i}>{part.slice(1)}</sub>
+      ) : (
+        part
+      ),
+    );
+}
 
 // # Component
 
@@ -1117,8 +1510,16 @@ export default demo(
             to subtract it from both sides. Drag a factor across to divide (or,
             from under a fraction bar, multiply) the other side. Drop a term on
             a like term to add them, a number on a number to multiply them, a
-            factor on a parenthesized sum to distribute it, or a factor on its
-            match across a fraction bar to cancel.
+            factor on a parenthesized sum to multiply it out (grab a sum by its
+            parentheses), a power on a power of the same base to add exponents,
+            or a factor on its match across a fraction bar to cancel.
+          </p>
+          <p>
+            Drop an exponent on its base to work it out or write it as a
+            product, drag it across the <b>=</b> to take a root, or drag it out
+            of a log to the front. Drag the base of a power across to take a
+            log, the base of a log across to exponentiate, or drop a log's base
+            on its argument to work it out.
           </p>
         </DemoNotes>
         <div className="flex flex-wrap gap-2 mb-3 items-center">
@@ -1136,7 +1537,7 @@ export default demo(
                 setAttempt((n) => n + 1);
               }}
             >
-              {src.replace(/-/g, "−")}
+              {prettySource(src)}
             </button>
           ))}
           <button
