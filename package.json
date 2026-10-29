@@ -2,6 +2,7 @@
   "name": "dragology",
   "version": "0.1.7",
   "description": "Declarative dragging for SVG on the web",
+  "license": "MIT",
   "homepage": "https://declarative-dragging.github.io",
   "repository": {
     "type": "git",
