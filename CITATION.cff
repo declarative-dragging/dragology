@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: Please cite the paper.
+title: Dragology
+authors:
+  - given-names: Joshua
+    family-names: Horowitz
+  - given-names: Andrew
+    family-names: Blinn
+  - given-names: Jeffrey
+    family-names: Heer
+repository-code: https://github.com/declarative-dragging/dragology
+url: https://declarative-dragging.github.io
+preferred-citation:
+  type: conference-paper
+  title: Declarative Dragging
+  authors:
+    - given-names: Joshua
+      family-names: Horowitz
+    - given-names: Andrew
+      family-names: Blinn
+    - given-names: Jeffrey
+      family-names: Heer
+  collection-title: "Proceedings of the 39th Annual ACM Symposium on User Interface Software and Technology (UIST '26)"
+  year: 2026

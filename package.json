@@ -1,6 +1,19 @@
 {
   "name": "dragology",
   "version": "0.1.7",
+  "description": "Declarative dragging for SVG on the web",
+  "homepage": "https://declarative-dragging.github.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/declarative-dragging/dragology.git"
+  },
+  "bugs": "https://github.com/declarative-dragging/dragology/issues",
+  "keywords": [
+    "drag-and-drop",
+    "react",
+    "svg",
+    "direct-manipulation"
+  ],
   "type": "module",
   "packageManager": "pnpm@9.12.0",
   "main": "dist-lib/index.js",
