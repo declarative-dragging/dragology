@@ -263,8 +263,9 @@ function DraggableRendererControlled<T extends object>({
 
   // A drag that ends on the element it started on would also fire a
   // click there (React keeps the element mounted through the drag), so
-  // the click that follows a drop is swallowed. Cleared on the next
-  // pointerdown in case that click never comes.
+  // the click that follows a drop is swallowed, default action and all
+  // (so a dragged link isn't followed). Cleared on the next pointerdown
+  // in case that click never comes.
   const suppressClickRef = useRef(false);
 
   const [svgElem, setSvgElem] = useState<SVGSVGElement | null>(null);
@@ -480,6 +481,7 @@ function DraggableRendererControlled<T extends object>({
         if (!suppressClickRef.current) return;
         suppressClickRef.current = false;
         e.stopPropagation();
+        e.preventDefault();
       }}
     >
       {drawn.layers}
