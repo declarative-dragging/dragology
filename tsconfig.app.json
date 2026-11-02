@@ -10,7 +10,7 @@
     /* Bundler mode */
     "moduleResolution": "bundler",
     "paths": {
-      "#dragology-built": ["./src/lib.ts"]
+      "#dragology-bench": ["./src/bench/index.ts"]
     },
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,

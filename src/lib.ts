@@ -74,9 +74,3 @@ export {
 } from "./DragSpecTreeView";
 export type { RenderedState } from "./DragSpecTreeView";
 export { DistanceLine, OverlayVis } from "./OverlayVis";
-
-// Benchmarking
-export {
-  setupListsInListsBenchmark,
-  setupPivotTableBenchmark,
-} from "./benchmarking";

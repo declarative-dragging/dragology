@@ -2,7 +2,7 @@ import {
   DragResult,
   dragSpecToBehavior,
   setupListsInListsBenchmark,
-} from "#dragology-built";
+} from "#dragology-bench";
 import { BenchCompareOptions, test } from "vitest";
 
 function powersOfTwoUpTo(max: number) {

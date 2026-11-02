@@ -31,6 +31,7 @@ Fuzzing every demo takes several minutes. Don't block on a full `pnpm fuzz` with
 - `src/demo/`: demo infrastructure (`demo()`, `DemoDraggable`, config panels).
 - `src/study/`: the study pages. `src/studio/`: the studio sections.
 - `src/fuzz/`: the fuzzer.
+- `src/bench/`: the benchmarks (`*.bench.ts`, run by `pnpm bench`). They import from `#dragology-bench`: `src/bench/index.ts` (the library plus setup helpers), built to `dist-bench/`.
 - `examples/consumer/`: a small app that imports `dragology` from a packed tarball, never from `src`. `pnpm check:consumer` packs the library, installs it there, and typechecks (bundled `.d.ts` included) and builds the app. Run it after changing what `src/lib.ts` exports or how the library is built or packaged.
 
 ## Demos

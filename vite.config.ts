@@ -29,7 +29,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "#dragology-built": new URL("dist-lib/index.js", import.meta.url)
+      "#dragology-bench": new URL("dist-bench/benchmarking.js", import.meta.url)
         .pathname,
     },
   },
