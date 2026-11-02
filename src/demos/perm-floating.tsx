@@ -1,5 +1,5 @@
 import { produce } from "immer";
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { amb, produceAmb } from "../amb";
 import { DemoDraggable } from "../demo/ui";
 import { Draggable } from "../draggable";

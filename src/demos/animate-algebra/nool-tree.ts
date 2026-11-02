@@ -1,7 +1,7 @@
 // Shared tree operations for Nool demos.
 // Pure .ts — no JSX, no framework imports.
 
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { Tree } from "./asts";
 
 // # Op definitions

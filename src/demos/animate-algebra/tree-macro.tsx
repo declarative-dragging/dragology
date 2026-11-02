@@ -2,7 +2,7 @@
 // Enter macro mode → freely rearrange the tree → exit → rule derived from diff
 
 import { produce } from "immer";
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { useMemo, useState } from "react";
 import { demo } from "../../demo";
 import {

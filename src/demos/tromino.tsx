@@ -1,4 +1,4 @@
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { useMemo, useState } from "react";
 import { amb, runAmb } from "../amb";
 import { demo } from "../demo";

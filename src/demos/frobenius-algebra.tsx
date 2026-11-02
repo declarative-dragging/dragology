@@ -1,5 +1,5 @@
 import { produce } from "immer";
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { useState } from "react";
 import { demo } from "../demo";
 import { DemoDraggable, DemoNotes } from "../demo/ui";

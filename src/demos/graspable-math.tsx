@@ -4,7 +4,7 @@
 // term onto another to combine them, an exponent onto its base to
 // multiply it out, a log's base onto its argument to evaluate it.
 
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { Children, isValidElement, useState } from "react";
 import { demo } from "../demo";
 import { DemoDraggable, DemoNotes } from "../demo/ui";

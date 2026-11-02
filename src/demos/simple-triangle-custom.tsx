@@ -1,4 +1,4 @@
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { DemoDraggable, DemoNotes } from "../demo/ui";
 import { Draggable } from "../draggable";
 import { Vec2 } from "../math/vec2";

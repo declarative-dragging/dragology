@@ -26,7 +26,7 @@
  * distinct trouble it finds.
  */
 
-import _ from "lodash";
+import * as _ from "lodash-es";
 import React from "react";
 import { DragInitContext, dragSpecToBehavior } from "../DragBehavior";
 import { DragSpec } from "../DragSpec";

@@ -1,5 +1,5 @@
 import { curveCardinal, line } from "d3-shape";
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { useMemo, useState } from "react";
 import { arrowhead } from "../../arrows";
 import { demo } from "../../demo";

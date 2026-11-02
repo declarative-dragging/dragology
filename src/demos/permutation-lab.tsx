@@ -1,4 +1,4 @@
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { useState } from "react";
 import { amb, produceAmb } from "../amb";
 import { arrowhead } from "../arrows";

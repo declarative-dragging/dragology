@@ -1,5 +1,5 @@
 import { produce } from "immer";
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { useLayoutEffect, useRef, useState } from "react";
 import { amb, produceAmb } from "../amb";
 import { demo } from "../demo";

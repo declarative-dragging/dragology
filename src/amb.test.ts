@@ -1,4 +1,4 @@
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { describe, expect, it } from "vitest";
 import { amb, fail, generateAmb, produceAmb, require, runAmb } from "./amb";
 

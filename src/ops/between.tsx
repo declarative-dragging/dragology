@@ -1,5 +1,5 @@
 import { PrettyPrint } from "@joshuahhh/pretty-print";
-import _ from "lodash";
+import * as _ from "lodash-es";
 import {
   DragFrame,
   DragInitContext,

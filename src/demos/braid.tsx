@@ -1,4 +1,4 @@
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { demo } from "../demo";
 import {

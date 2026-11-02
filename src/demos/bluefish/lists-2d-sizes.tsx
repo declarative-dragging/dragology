@@ -11,7 +11,7 @@ import {
   Text,
 } from "bluefish-js";
 import { produce } from "immer";
-import _ from "lodash";
+import * as _ from "lodash-es";
 import { amb, produceAmb } from "../../amb";
 import { demo } from "../../demo";
 import { DemoDraggable, DemoNotes } from "../../demo/ui";
