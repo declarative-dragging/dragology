@@ -394,7 +394,7 @@ export function DemoSettingsBar({
           className={`pointer-events-auto bg-white border border-gray-200 flex items-center shadow-[0_-4px_12px_rgba(0,0,0,0.08)] ${
             compact
               ? "py-1.5 px-2 rounded-full gap-1 mb-2 border-b"
-              : "py-2 px-3 rounded-t-3xl border-b-0 gap-1.5"
+              : "py-2 px-3 rounded-t-3xl border-b-0 gap-1 md:gap-1.5"
           }`}
         >
           {entries.map(({ key, label, mobileHidden }) => {
@@ -409,7 +409,9 @@ export function DemoSettingsBar({
                     ? "hidden md:inline-flex"
                     : "inline-flex"
                 } items-center rounded-full border select-none cursor-pointer ${
-                  compact ? "p-1.5" : "gap-1.5 px-3 py-1.5 text-xs font-medium"
+                  compact
+                    ? "p-1.5"
+                    : "p-1.5 md:gap-1.5 md:px-3 md:py-1.5 text-xs font-medium"
                 }`}
                 style={
                   active
@@ -432,7 +434,7 @@ export function DemoSettingsBar({
                 >
                   {settingsIcons[key]}
                 </span>
-                {!compact && label}
+                {!compact && <span className="hidden md:inline">{label}</span>}
               </button>
             );
           })}
