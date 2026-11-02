@@ -24,7 +24,7 @@ export function IndexPage() {
           </Link>
 
           <a
-            href="https://github.com/joshuahhh/draggable-diagrams"
+            href="https://github.com/declarative-dragging/dragology"
             target="_blank"
             rel="noopener noreferrer"
             className="block w-64 px-6 py-4 text-lg text-gray-700 hover:text-gray-900 no-underline"

@@ -1,4 +1,4 @@
-// Public API entry point for the draggable-diagrams library.
+// Public API entry point for Dragology.
 
 // Augment React's SVGAttributes with the `dragology` prop.
 import "./jsx.d";

@@ -1015,7 +1015,7 @@ export function DemoCard({
   linkTitle?: boolean;
   onTagClick?: (label: string) => void;
 }) {
-  const sourceUrl = `https://github.com/joshuahhh/draggable-diagrams/blob/main/src/demos/${demo.sourcePath}`;
+  const sourceUrl = `https://github.com/declarative-dragging/dragology/blob/main/src/demos/${demo.sourcePath}`;
   return (
     <div
       className={`bg-white rounded-lg p-5 shadow-sm ${demo.cardClassName ?? ""}`}
