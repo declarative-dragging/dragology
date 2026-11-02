@@ -22,6 +22,11 @@ export default defineConfig({
   build: {
     outDir: "dist-demo",
   },
+  // Vite scans every .html file for deps by default, which would reach into
+  // examples/consumer (its own app, with its own node_modules).
+  optimizeDeps: {
+    entries: ["index.html"],
+  },
   resolve: {
     alias: {
       "#dragology-built": new URL("dist-lib/index.js", import.meta.url)

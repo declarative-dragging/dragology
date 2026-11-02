@@ -17,6 +17,7 @@ This repo is the Dragology library (public API: `src/lib.ts`) plus a site of dem
 | Fuzz one demo | `pnpm fuzz -t "^fuzz <demo-id>$"` |
 | Benchmarks | `pnpm bench` |
 | Build the library | `pnpm build:lib` |
+| Check the packed library as an npm user gets it | `pnpm check:consumer` |
 
 Use the `package.json` scripts; don't improvise your own versions of them. `tsc --noEmit` is wrong!
 
@@ -30,6 +31,7 @@ Fuzzing every demo takes several minutes. Don't block on a full `pnpm fuzz` with
 - `src/demo/`: demo infrastructure (`demo()`, `DemoDraggable`, config panels).
 - `src/study/`: the study pages. `src/studio/`: the studio sections.
 - `src/fuzz/`: the fuzzer.
+- `examples/consumer/`: a small app that imports `dragology` from a packed tarball, never from `src`. `pnpm check:consumer` packs the library, installs it there, and typechecks (bundled `.d.ts` included) and builds the app. Run it after changing what `src/lib.ts` exports or how the library is built or packaged.
 
 ## Demos
 
