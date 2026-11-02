@@ -1,40 +1,49 @@
 import { Link } from "react-router-dom";
 import { useTitle } from "./useTitle";
 
+const linkClass = "text-blue-700 underline hover:text-blue-900";
+
 export function IndexPage() {
   useTitle("Dragology");
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center">
-      <div className="text-center py-10 px-5 max-w-3xl mx-auto">
-        <h1 className="text-4xl font-normal text-gray-800 mb-12">Dragology</h1>
+    <div className="min-h-screen bg-gray-50 select-text">
+      <div className="max-w-prose mx-auto px-5 py-16 text-gray-800 leading-relaxed">
+        <h1 className="text-4xl font-normal mb-8">Dragology demos</h1>
 
-        <div className="flex flex-col gap-4 items-center">
-          <Link
-            to="/demos"
-            className="block w-64 px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors no-underline text-center font-medium"
-          >
-            Demos
-          </Link>
-
-          <Link
-            to="/study"
-            className="block w-64 px-6 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors no-underline text-center font-medium"
-          >
-            Study
-          </Link>
-
+        <p className="mb-6">
+          This page hosts demos built from the{" "}
           <a
             href="https://github.com/declarative-dragging/dragology"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block w-64 px-6 py-4 text-lg text-gray-700 hover:text-gray-900 no-underline"
+            className={linkClass}
           >
-            GitHub
+            Dragology repository
           </a>
-        </div>
-      </div>
-      <div className="absolute bottom-4 text-xs text-gray-400 font-mono">
-        {__COMMIT_HASH__}
+          . For more on Dragology, please visit{" "}
+          <a
+            href="https://declarative-dragging.github.io/"
+            className={linkClass}
+          >
+            Declarative Dragging
+          </a>
+          .
+        </p>
+
+        <ul className="list-disc pl-6 space-y-1">
+          <li>
+            <Link to="/demos" className={linkClass}>
+              Demos
+            </Link>
+          </li>
+          <li>
+            <Link to="/study" className={linkClass}>
+              Study
+            </Link>
+          </li>
+        </ul>
+
+        <footer className="mt-16 text-xs text-gray-400 font-mono">
+          {__COMMIT_HASH__}
+        </footer>
       </div>
     </div>
   );
