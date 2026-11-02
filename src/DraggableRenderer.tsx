@@ -153,9 +153,11 @@ export interface DraggableRendererBaseProps<T extends object> {
 
 export type DraggableRendererProps<T extends object> =
   DraggableRendererBaseProps<T> &
-    (
-      | { state: T; initialState?: undefined }
-      | { state?: undefined; initialState: T }
+    // States are often provided with more specific types than the
+    // true T, so we use NoInfer to make DraggableRenderer use T from
+    // the Draggable.
+    (| { state: NoInfer<T>; initialState?: undefined }
+      | { state?: undefined; initialState: NoInfer<T> }
     );
 
 export function DraggableRenderer<T extends object>({

@@ -486,11 +486,16 @@ export function DemoDraggable<T extends object>({
   stateOverride?: Partial<T>;
   /** Called with the preview state on every frame of a drag. */
   onDragState?: (state: T) => void;
-} & (
-  | { initialState: T; state?: undefined; onDropState?: undefined }
-  /** Controlled: the caller owns the state. */
-  | { state: T; onDropState: (state: T) => void; initialState?: undefined }
-)) {
+} &
+  // See DraggableRendererProps re: use of NoInfer here.
+  (| { initialState: NoInfer<T>; state?: undefined; onDropState?: undefined }
+    /** Controlled: the caller owns the state. */
+    | {
+        state: NoInfer<T>;
+        onDropState: (state: T) => void;
+        initialState?: undefined;
+      }
+  )) {
   // exactly one of these is given
   const start = (initialState ?? controlledState) as T;
   const collectedRef = useRef(false);
