@@ -32,6 +32,10 @@ export {
   translate,
 } from "./svgx/helpers";
 
+// Showing values in debug views and error messages
+export { DefaultValueView, ValueView, ValueViewProvider } from "./ValueView";
+export type { ValueViewComponent, ValueViewProps } from "./ValueView";
+
 // Math
 export { Vec2 } from "./math/vec2";
 export type { Vec2able } from "./math/vec2";

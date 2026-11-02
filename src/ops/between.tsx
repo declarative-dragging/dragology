@@ -1,4 +1,3 @@
-import { PrettyPrint } from "@joshuahhh/pretty-print";
 import * as _ from "lodash-es";
 import {
   DragFrame,
@@ -42,6 +41,7 @@ import { drawLayered, findByPathInLayered, LayeredSvgx } from "../svgx/layers";
 import { lerpLayeredWeighted } from "../svgx/lerp";
 import { assert, assertNever } from "../utils/assert";
 import { Many, manyToArray } from "../utils/flexible-types";
+import { ValueView } from "../ValueView";
 import { fixedState } from "./fixed";
 
 export type BetweenInterpolation = "delaunay" | "natural-neighbor";
@@ -407,13 +407,7 @@ function CoincidentStatePreview<T extends object>({
         )}
       </svg>
       <div style={{ fontStyle: "italic" }}>from</div>
-      <PrettyPrint
-        value={state}
-        precision={2}
-        style={{ fontSize: "11px" }}
-        niceId={false}
-        niceType={false}
-      />
+      <ValueView kind="state" value={state} />
     </div>
   );
 }

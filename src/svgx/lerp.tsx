@@ -1,4 +1,3 @@
-import { PrettyPrint } from "@joshuahhh/pretty-print";
 import { color, rgb } from "d3-color";
 import * as d3Interpolate from "d3-interpolate";
 import { interpolatePath } from "d3-interpolate-path";
@@ -15,6 +14,7 @@ import {
 import { ErrorWithJSX } from "../ErrorBoundary";
 import { lerp } from "../math/vec2";
 import { objectKeys } from "../utils/js";
+import { ValueView } from "../ValueView";
 import { Layer, LayeredSvgx } from "./layers";
 import { lerpTransformString } from "./transform";
 
@@ -248,9 +248,9 @@ export function lerpSvgx(
             paths, and they don't match up.)
           </p>
         )}
-        <PrettyPrint value={a} />
+        <ValueView kind="svg" value={a} />
         <div style={{ marginTop: 16, marginBottom: 16 }}>vs</div>
-        <PrettyPrint value={b} />
+        <ValueView kind="svg" value={b} />
       </>,
     );
   }
