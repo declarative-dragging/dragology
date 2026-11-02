@@ -71,9 +71,9 @@ type State = { items: string[] };
 type State = { nodes: Record<string, { x: number; y: number }> };
 ```
 
-### Positioning: Always Use `transform={translate(...)}`
+### Positioning: Always Use `transform={...}`
 
-Position elements with `transform={translate(x, y)}`, **not** with `x`/`y` attributes. The library tracks SVG transforms to know where elements are — `translate()` is what it understands.
+Position elements with `transform={...}`, **not** with `x`/`y` attributes. The library tracks SVG transforms to know where elements are. All transforms should work. Helpers like `translate(x, y)` are available.
 
 ```tsx
 // Good
