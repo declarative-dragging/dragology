@@ -10,17 +10,17 @@ export function IndexPage() {
 
         <div className="flex flex-col gap-4 items-center">
           <Link
-            to="/study"
-            className="block w-64 px-6 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors no-underline text-center font-medium"
-          >
-            Study
-          </Link>
-
-          <Link
             to="/demos"
             className="block w-64 px-6 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors no-underline text-center font-medium"
           >
             Demos
+          </Link>
+
+          <Link
+            to="/study"
+            className="block w-64 px-6 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors no-underline text-center font-medium"
+          >
+            Study
           </Link>
 
           <a
