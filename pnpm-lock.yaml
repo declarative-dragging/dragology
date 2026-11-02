@@ -32,9 +32,6 @@ importers:
       lodash:
         specifier: ^4.17.21
         version: 4.17.21
-      qrcode-generator:
-        specifier: ^2.0.4
-        version: 2.0.4
     devDependencies:
       '@eslint/js':
         specifier: ^9.39.1
@@ -126,6 +123,9 @@ importers:
       prettier-plugin-organize-imports:
         specifier: ^4.0.0
         version: 4.3.0(prettier@3.8.1)(typescript@5.9.3)
+      qrcode-generator:
+        specifier: ^2.0.4
+        version: 2.0.4
       react:
         specifier: ^19.2.0
         version: 19.2.0
