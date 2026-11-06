@@ -16,7 +16,12 @@ export type { Draggable, DraggableProps, SetState } from "./draggable";
 
 // DragSpec & builder
 export { and, inOrder, lessThan, moreThan, param } from "./DragSpec";
-export type { DragSpec, DragSpecBuilder, DragSpecMethods } from "./DragSpec";
+export type {
+  DragSpec,
+  DragSpecBuilder,
+  DragSpecMethods,
+  VaryPath,
+} from "./DragSpec";
 
 // Transitions
 export type { Transition, TransitionLike } from "./transition";
@@ -31,6 +36,11 @@ export {
   scale,
   translate,
 } from "./svgx/helpers";
+
+// Drawing between elements: points in elements' own coordinates,
+// resolved once the whole tree is built
+export { Finalizers, pointRef } from "./svgx/finalizers";
+export type { PointRef } from "./svgx/finalizers";
 
 // Showing values in debug views and error messages
 export { DefaultValueView, ValueView, ValueViewProvider } from "./ValueView";
@@ -69,6 +79,13 @@ export type { DragSpecData, DragSpecLike } from "./DragSpec";
 export { Modifier, Operator } from "./op";
 export type { Child, OpOverlayVisProps, OpResult, OpTreeViewProps } from "./op";
 export type { LayeredSvgx } from "./svgx/layers";
+// Adding marks of their own to a preview, as withOverlay does
+export {
+  layerSvg,
+  layeredMerge,
+  layeredPrefixIds,
+  layeredShiftZIndices,
+} from "./svgx/layers";
 // Building blocks for their debug views
 export {
   Box,
