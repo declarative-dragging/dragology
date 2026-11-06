@@ -18,6 +18,7 @@ This repo is the Dragology library (public API: `src/lib.ts`) plus a site of dem
 | Benchmarks | `pnpm bench` |
 | Build the library | `pnpm build:lib` |
 | Check the packed library as an npm user gets it | `pnpm check:consumer` |
+| Release a patch version (a pushed `v*` tag publishes to npm from CI) | `pnpm release` |
 
 Use the `package.json` scripts; don't improvise your own versions of them. `tsc --noEmit` is wrong!
 

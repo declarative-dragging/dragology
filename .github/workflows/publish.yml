@@ -1,0 +1,40 @@
+# Publishes to npm when a version tag is pushed (`pnpm release`). Auth is npm
+# trusted publishing (OIDC), so there's no token or one-time password; the
+# trust relationship is set up for this filename on npmjs.com.
+name: Publish to npm
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          # Trusted publishing needs npm 11.5.1+, which Node 22 doesn't ship.
+          node-version: 24
+          cache: "pnpm"
+          registry-url: "https://registry.npmjs.org"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check the tag matches package.json
+        run: test "$GITHUB_REF_NAME" = "v$(node -p "require('./package.json').version")"
+      - name: Check
+        run: pnpm check
+      - name: Check the packed library
+        run: pnpm check:consumer
+      # npm, not pnpm: npm documents OIDC for `npm publish` only.
+      # prepublishOnly still builds the library.
+      - name: Publish
+        run: npm publish

@@ -39,7 +39,7 @@
     "check": "pnpm run typecheck && pnpm test && pnpm run lint",
     "check:consumer": "bash examples/consumer/check.sh",
     "prepublishOnly": "pnpm run clean && pnpm run build:lib",
-    "release": "pnpm run check && pnpm version patch && pnpm publish"
+    "release": "pnpm run check && pnpm version patch && git push origin main --follow-tags"
   },
   "peerDependencies": {
     "react": "^18 || ^19",
