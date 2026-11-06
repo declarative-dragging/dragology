@@ -1,6 +1,6 @@
 {
   "name": "dragology",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "description": "Declarative dragging for SVG on the web",
   "license": "MIT",
   "homepage": "https://declarative-dragging.github.io",
