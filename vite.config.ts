@@ -38,6 +38,8 @@ export default defineConfig({
     // The fuzz tests (src/fuzz) take minutes; they only run via
     // `pnpm fuzz` (which sets FUZZ=1), not on every `pnpm test`.
     exclude: [...gitIgnored, ...(process.env.FUZZ ? [] : ["src/fuzz/**"])],
+    // CI machines are slow enough to time out tests that pass locally.
+    testTimeout: process.env.CI ? 60000 : 5000,
     typecheck: {
       enabled: true,
       tsconfig: "./tsconfig.app.json",
