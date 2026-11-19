@@ -7,7 +7,7 @@
 import * as _ from "lodash-es";
 import { Children, isValidElement, useState } from "react";
 import { demo } from "../demo";
-import { DemoDraggable, DemoNotes } from "../demo/ui";
+import { DemoDraggable, DemoLink, DemoNotes } from "../demo/ui";
 import { type DragFrame, type DragInitContext } from "../DragBehavior";
 import { Draggable } from "../draggable";
 import {
@@ -1503,9 +1503,7 @@ export default demo(
         <DemoNotes>
           <p>
             Solve for <i>x</i> by dragging, after{" "}
-            <a href="https://graspablemath.com" className="underline">
-              Graspable Math
-            </a>
+            <DemoLink href="https://graspablemath.com">Graspable Math</DemoLink>
             . Drag a term along its side to reorder it, or across the <b>=</b>{" "}
             to subtract it from both sides. Drag a factor across to divide (or,
             from under a fraction bar, multiply) the other side. Drop a term on
