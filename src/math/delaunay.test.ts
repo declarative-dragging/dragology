@@ -84,4 +84,35 @@ describe("findTriangle", () => {
     const pt = Vec2(250, 55);
     expect(delaunay.findTriangle(pt)).toEqual(-1);
   });
+
+  it("finds a point that rounding puts outside both triangles of an edge", () => {
+    // From the plot-treemap demo: where a dragged file lands in each
+    // state it can be dropped into, and a pointer on the edge between
+    // points 9 and 13. The walk used to cycle between the two triangles
+    // on that edge forever.
+    const coords = [
+      9.01083591331269, 88.32164948453608, 183.45574819401446,
+      88.32164948453608, 183.45574819401446, 217.04962875914748,
+      281.5810113519092, 217.04962875914748, 9.01083591331269,
+      270.05740077987286, 168.35955386203065, 270.05740077987286,
+      256.4206874652695, 270.05740077987286, 256.4206874652695,
+      347.62053140436154, 327.62136222910215, 88.32164948453608,
+      420.53715170278633, 88.32164948453608, 463.42136222910216,
+      88.32164948453608, 463.42136222910216, 135.81134020618555,
+      327.62136222910215, 217.23917525773197, 424.4937306501548,
+      217.23917525773197, 477.3332043343653, 217.23917525773197,
+    ];
+    const points = coords.flatMap((c, i) =>
+      i % 2 === 0 ? [Vec2(c, coords[i + 1])] : [],
+    );
+    const delaunay = new Delaunay(points);
+    const pt = Vec2(423.174871001032, 174.26666666666668);
+    const tri = delaunay.findTriangle(pt);
+    expect(tri).not.toEqual(-1);
+    const [a, b, c] = delaunay.triangle(tri);
+    const cross = (p: Vec2, q: Vec2) =>
+      (q.x - p.x) * (pt.y - p.y) - (q.y - p.y) * (pt.x - p.x);
+    const signs = [cross(a, b), cross(b, c), cross(c, a)];
+    expect(signs.every((s) => s >= 0) || signs.every((s) => s <= 0)).toBe(true);
+  });
 });

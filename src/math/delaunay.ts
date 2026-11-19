@@ -96,16 +96,21 @@ export class Delaunay {
       // if (visit) visit(current);
 
       const next = getNext(current);
-      const pc = triangles[current] * 2;
-      const pn = triangles[next] * 2;
-      const o = orientation(
-        points[pc],
-        points[pc + 1],
-        points[pn],
-        points[pn + 1],
+      // To avoid infinite cycles where neighboring triangles both
+      // reject a point along their border due to rounding error, we
+      // measure orientation using a globally-fixed edge direction.
+      const i = triangles[current];
+      const j = triangles[next];
+      const [a, b] = i < j ? [i, j] : [j, i];
+      const oFromA = orientation(
+        points[2 * a],
+        points[2 * a + 1],
+        points[2 * b],
+        points[2 * b + 1],
         pt.x,
         pt.y,
       );
+      const o = i < j ? oFromA : -oFromA;
 
       if (o >= 0) {
         if (start === (current = next)) break;
