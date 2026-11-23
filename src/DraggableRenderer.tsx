@@ -32,9 +32,13 @@ import { Svgx, findElement, updatePropsDownTree } from "./svgx";
 import { boundsCenter, getLocalBounds } from "./svgx/bounds";
 import { ComponentHost } from "./svgx/componentHost";
 import { LayeredSvgx, drawLayered, layerSvg } from "./svgx/layers";
-import { lerpLayered } from "./svgx/lerp";
+import { lerpLayered, lerpSvgx } from "./svgx/lerp";
 import { assignPaths, findByPath, getPath } from "./svgx/path";
-import { globalToLocal, localToGlobal } from "./svgx/transform";
+import {
+  combineTransforms,
+  globalToLocal,
+  localToGlobal,
+} from "./svgx/transform";
 import {
   Transition,
   TransitionLike,
@@ -515,7 +519,9 @@ function DraggableRendererControlled<T extends object>({
  * The target is used as the base (first arg to lerpLayered) so its
  * non-interpolatable props (like event handlers) are preserved.
  * Layers with dragologyTransition={false} are never sprung — they
- * always show the target's version so they track the cursor.
+ * always show the target's version so they track the cursor. Layers
+ * with dragologyTransition={{ anchor }} are sprung around their
+ * anchor: they change shape but stay where the target puts them.
  */
 function runSpring(
   springOrigin: SpringOrigin | null,
@@ -528,12 +534,28 @@ function runSpring(
   const lerped = lerpLayered(target, springOrigin.layered, 1 - t, "a");
   // Replace non-transitioning layers with the target's version so they
   // track the cursor without spring lag.
-  for (const [key, layer] of lerped.byId.entries()) {
-    if (layer.element.props["dragologyTransition"] === false) {
-      const targetVal = target.byId.get(key);
-      if (targetVal) {
-        lerped.byId.set(key, targetVal);
+  for (const [key, layer] of target.byId.entries()) {
+    const transition = layer.element.props.dragologyTransition;
+    if (transition === false) {
+      lerped.byId.set(key, layer);
+    } else if (typeof transition === "object") {
+      const from = springOrigin.layered.byId.get(key);
+      const fromTransition = from?.element.props.dragologyTransition;
+      if (!from || typeof fromTransition !== "object") {
+        lerped.byId.set(key, layer);
+        continue;
       }
+      const shift = Vec2(transition.anchor).sub(fromTransition.anchor);
+      const fromShifted = React.cloneElement(from.element, {
+        transform: combineTransforms(
+          `translate(${shift.x}, ${shift.y})`,
+          from.element.props.transform ?? "",
+        ),
+      });
+      lerped.byId.set(key, {
+        ...layer,
+        element: lerpSvgx(layer.element, fromShifted, 1 - t, "a"),
+      });
     }
   }
   return lerped;

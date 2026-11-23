@@ -171,7 +171,12 @@ class WithFloatingOp<T extends object> extends Modifier<T> {
         backdrop,
         pipe(
           floatPositioned,
-          (h) => layeredSetAttributes(h, { dragologyTransition: false }),
+          // When the backdrop springs, the float changes shape around
+          // the pointer, rather than lagging behind it.
+          (h) =>
+            layeredSetAttributes(h, {
+              dragologyTransition: { anchor: { x: target.x, y: target.y } },
+            }),
           (h) => layeredShiftZIndices(h, 1000000),
         ),
       );

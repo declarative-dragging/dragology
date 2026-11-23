@@ -33,7 +33,7 @@ declare module "react" {
     dragologyOnDrag?: (() => DragSpecBrand) | false | null | undefined;
 
     dragologyZIndex?: number | string | false | null;
-    dragologyTransition?: boolean;
+    dragologyTransition?: boolean | { anchor: { x: number; y: number } };
     dragologyEmergeFrom?: string;
     dragologyEmergeMode?: "clone" | "scale";
     dragologyOpaque?: boolean;
