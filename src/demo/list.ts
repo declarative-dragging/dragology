@@ -61,6 +61,7 @@ export const demoList: DemoListEntry[] = [
   "orbiting-planet-with-background",
   "orbiting-planet-medieval-scholastic",
   "orbiting-planet-textbook",
+  "orbiting-planet-i-spy",
   "constrained-slider",
   "point-in-circle",
   "point-in-polygon",
